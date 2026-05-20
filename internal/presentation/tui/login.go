@@ -20,16 +20,11 @@ type LoginWaitingView struct {
 
 func (v LoginWaitingView) Render(ctx context.Context, w io.Writer) error {
 	if v.In != nil {
-		p := tea.NewProgram(loginWaitingModel{
+		_, err := runInteractive(loginWaitingModel{
 			ctx:      ctx,
 			viewport: viewportFromContext(ctx),
 			loginURL: v.LoginURL,
-		},
-			tea.WithOutput(w),
-			tea.WithInput(v.In),
-			tea.WithoutSignals(),
-		)
-		_, err := p.Run()
+		}, w, v.In)
 		return err
 	}
 	return runStatic(w, loginWaitingContent(viewportFromContext(ctx), v.LoginURL, "not connected", false, false))
@@ -117,9 +112,7 @@ type LoginSuccessView struct {
 }
 
 var loginSuccessChoices = []string{
-	"Instamart",
-	"Home",
-	"Account settings",
+	"Continue to Instamart",
 }
 
 type loginSuccessModel struct {
@@ -186,9 +179,7 @@ func (m loginSuccessModel) View() string {
 	sb.WriteString(line(""))
 	sb.WriteString(divider())
 	sb.WriteString(footerLine(
-		KeyHint{Key: "j/k", Label: "move"},
-		KeyHint{Key: "enter", Label: "select"},
-		KeyHint{Key: "b", Label: "back"},
+		KeyHint{Key: "enter", Label: "continue"},
 		KeyHint{Key: "q", Label: "quit"},
 	))
 	sb.WriteString(bottom())
@@ -204,10 +195,6 @@ func (v LoginSuccessView) Render(ctx context.Context, w io.Writer) error {
 	if email == "" {
 		email = "(no email)"
 	}
-	in := v.In
-	if in == nil {
-		in = strings.NewReader("")
-	}
 	m := loginSuccessModel{
 		ctx:      ctx,
 		viewport: viewportFromContext(ctx),
@@ -217,12 +204,7 @@ func (v LoginSuccessView) Render(ctx context.Context, w io.Writer) error {
 		email:    email,
 		message:  loginSuccessMessage(v.IsFirstAuth, v.WasReauth),
 	}
-	p := tea.NewProgram(m,
-		tea.WithOutput(w),
-		tea.WithInput(in),
-		tea.WithoutSignals(),
-	)
-	_, err := p.Run()
+	_, err := runInteractive(m, w, v.In)
 	return err
 }
 
