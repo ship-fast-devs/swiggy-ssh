@@ -44,6 +44,79 @@ func TestInstamartSearchUsesSelectedAddress(t *testing.T) {
 	}
 }
 
+func TestInstamartHomeEscReturnsToMainMenu(t *testing.T) {
+	address := domaininstamart.Address{ID: "addr-1", Label: "Home"}
+	m := instamartModel{screen: instamartScreenHome, selectedAddress: &address}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd == nil {
+		t.Fatal("esc from Instamart home should quit view back to main menu")
+	}
+	got := updated.(instamartModel)
+	if got.result.Action != InstamartActionBackToHome {
+		t.Fatalf("expected back-to-home action, got %v", got.result.Action)
+	}
+	if got.result.SelectedAddress.ID != "addr-1" {
+		t.Fatalf("expected selected address to be preserved, got %+v", got.result.SelectedAddress)
+	}
+}
+
+func TestRootLaunchedTrackingBackReturnsToMainMenu(t *testing.T) {
+	address := domaininstamart.Address{ID: "addr-1", Label: "Home"}
+	for _, tt := range []struct {
+		name   string
+		screen instamartScreen
+		key    tea.KeyMsg
+	}{
+		{name: "esc from tracking", screen: instamartScreenTracking, key: tea.KeyMsg{Type: tea.KeyEsc}},
+		{name: "back from tracking", screen: instamartScreenTracking, key: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")}},
+		{name: "enter from tracking", screen: instamartScreenTracking, key: tea.KeyMsg{Type: tea.KeyEnter}},
+		{name: "back from order result", screen: instamartScreenOrderResult, key: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")}},
+		{name: "enter from message", screen: instamartScreenMessage, key: tea.KeyMsg{Type: tea.KeyEnter}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := instamartModel{screen: tt.screen, startTracking: true, selectedAddress: &address}
+			updated, cmd := m.handleKey(tt.key)
+			if cmd == nil {
+				t.Fatal("root-launched tracking back should quit Instamart view")
+			}
+			got := updated.(instamartModel)
+			if got.result.Action != InstamartActionBackToHome {
+				t.Fatalf("expected back-to-home action, got %v", got.result.Action)
+			}
+			if got.result.SelectedAddress.ID != "addr-1" {
+				t.Fatalf("expected selected address to be preserved, got %+v", got.result.SelectedAddress)
+			}
+		})
+	}
+}
+
+func TestInstamartInternalTrackingBackReturnsToInstamartHome(t *testing.T) {
+	m := instamartModel{screen: instamartScreenTracking}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+	if cmd != nil {
+		t.Fatal("internal tracking back should stay inside Instamart")
+	}
+	got := updated.(instamartModel)
+	if got.screen != instamartScreenHome {
+		t.Fatalf("expected Instamart home, got %v", got.screen)
+	}
+}
+
+func TestRootLaunchedTrackingQStillQuitsSession(t *testing.T) {
+	m := instamartModel{screen: instamartScreenTracking, startTracking: true}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if cmd == nil {
+		t.Fatal("q should quit")
+	}
+	got := updated.(instamartModel)
+	if got.result.Action != InstamartActionQuit {
+		t.Fatalf("expected session quit action, got %v", got.result.Action)
+	}
+}
+
 func TestInstamartSearchInputAcceptsSpacesAndRendersCursor(t *testing.T) {
 	m := instamartModel{screen: instamartScreenSearchInput}
 
@@ -111,12 +184,12 @@ func TestInstamartHomeUsesDeveloperCopyAndStatusBar(t *testing.T) {
 	m := instamartModel{screen: instamartScreenHome, selectedAddress: &address, intendedItems: []domaininstamart.CartUpdateItem{{SpinID: "spin-milk", Quantity: 3}}}
 	out := m.View()
 
-	for _, want := range []string{"grep products", "recent cache", "staged cart", "tail active order", "deploy history", "switch target address", "env=instamart  auth=ok  cart=3  mode=home"} {
+	for _, want := range []string{"grep products", "recent cache", "staged cart", "env=instamart  auth=ok  cart=3  mode=home"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected %q in home output", want)
 		}
 	}
-	for _, old := range []string{"Search products", "Your go-to items", "View cart", "Track active order", "Order history", "Change address", "Delivering to", "target locked", "deploying to:", "Cart:"} {
+	for _, old := range []string{"Search products", "Your go-to items", "View cart", "Track active order", "tail active order", "deploy history", "Order history", "Change address", "switch target address", "Cancel order help", "Delivering to", "target locked", "deploying to:", "Cart:"} {
 		if strings.Contains(out, old) {
 			t.Fatalf("old copy %q should not be rendered", old)
 		}
@@ -184,18 +257,45 @@ func TestInstamartSearchEnterWithoutPreviewRunsCommittedSearch(t *testing.T) {
 	}
 }
 
-func TestInstamartAppViewPassesUserContextToAddressLoad(t *testing.T) {
+func TestInstamartAppViewUsesRootAddressFlow(t *testing.T) {
 	fake := &fakeInstamartService{}
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
 	var buf bytes.Buffer
-	err := InstamartAppView{Service: fake, UserID: "user-1", In: strings.NewReader("q")}.Render(ctx, &buf)
+	err := InstamartAppView{Service: fake, UserID: "user-1"}.Render(ctx, &buf)
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	if fake.addressUserID != "user-1" {
-		t.Fatalf("expected address load user context %q, got %q", "user-1", fake.addressUserID)
+	if fake.addressUserID != "" {
+		t.Fatalf("instamart must not load its own addresses, got user %q", fake.addressUserID)
+	}
+	if !strings.Contains(buf.String(), "Choose a deployment address from the main menu") {
+		t.Fatalf("expected root address guidance, got %q", buf.String())
+	}
+}
+
+func TestInstamartAppViewUsesSessionSelectedAddress(t *testing.T) {
+	fake := &fakeInstamartService{}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	var buf bytes.Buffer
+	err := InstamartAppView{
+		Service:         fake,
+		UserID:          "user-1",
+		Addresses:       []domaininstamart.Address{{ID: "addr-1", Label: "Home"}},
+		SelectedAddress: domaininstamart.Address{ID: "addr-1", Label: "Home"},
+		In:              strings.NewReader("q"),
+	}.Render(ctx, &buf)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if fake.addressCalls != 0 {
+		t.Fatalf("expected session address to skip address load, got %d calls", fake.addressCalls)
+	}
+	if !strings.Contains(buf.String(), "deploying to") || !strings.Contains(buf.String(), "Home") {
+		t.Fatalf("expected selected session address in output, got %q", buf.String())
 	}
 }
 
@@ -214,7 +314,7 @@ func TestInstamartProductRowsRenderVariationsAndSponsored(t *testing.T) {
 		}},
 	}
 	out := m.View()
-	for _, want := range []string{"#   item", "[ad]", "Sandwich Bread", "400 g", "Rs 49"} {
+	for _, want := range []string{"type item", "◆", "[ad]", "Sandwich Bread", "400 g", "Rs 49"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected %q in product output", want)
 		}
@@ -855,25 +955,6 @@ func TestInstamartActiveOrderTrackingFailureKeepsOrders(t *testing.T) {
 	}
 }
 
-func TestInstamartCancellationGuidanceDoesNotCallService(t *testing.T) {
-	fake := &fakeInstamartService{}
-	m := instamartModel{ctx: context.Background(), service: fake, screen: instamartScreenHome}
-	updated, cmd := m.runHomeAction("cancel")
-	if cmd != nil {
-		t.Fatal("cancel guidance should not call service")
-	}
-	out := updated.(instamartModel).View()
-	if !strings.Contains(out, cancellationGuidance) {
-		t.Fatal("expected exact cancellation guidance")
-	}
-	if strings.Contains(out, "✓ "+cancellationGuidance) {
-		t.Fatal("cancellation guidance must not render as a success status")
-	}
-	if fake.anyCalls() {
-		t.Fatal("cancellation guidance must not call provider service")
-	}
-}
-
 func TestInstamartViewCartRequiresSelectedAddress(t *testing.T) {
 	fake := &fakeInstamartService{cart: cartWithItems(nil)}
 	m := instamartModel{ctx: context.Background(), service: fake, screen: instamartScreenHome}
@@ -990,9 +1071,11 @@ type fakeInstamartService struct {
 	getCartCalls   int
 	checkoutCalls  int
 	trackCalls     int
+	addressCalls   int
 }
 
 func (f *fakeInstamartService) GetAddresses(ctx context.Context) ([]domaininstamart.Address, error) {
+	f.addressCalls++
 	f.addressUserID, _ = domainauth.UserIDFromContext(ctx)
 	return []domaininstamart.Address{{ID: "addr-1", Label: "Home", DisplayLine: "Test address", PhoneMasked: "****0001"}}, nil
 }

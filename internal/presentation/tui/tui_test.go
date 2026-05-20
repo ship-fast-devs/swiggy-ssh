@@ -21,7 +21,7 @@ func renderCtx() (context.Context, context.CancelFunc) {
 
 // --- HomeView ---
 
-func TestHomeViewRendersMenuItems(t *testing.T) {
+func TestHomeViewRendersSplash(t *testing.T) {
 	ctx, cancel := renderCtx()
 	defer cancel()
 	v := tui.HomeView{}
@@ -32,18 +32,101 @@ func TestHomeViewRendersMenuItems(t *testing.T) {
 	out := buf.String()
 
 	for _, want := range []string{
-		"swiggy.ssh",
-		"Instamart",
-		"Food",
-		"Reorder usuals",
-		"coming soon",
-		"j/k move",
-		"● Connected SSH",
+		"swiggy.dev",
+		"enter continue",
+		"▸",
+		"auth required",
 		"⣿⣿⣿", // braille logo
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in HomeView output", want)
 		}
+	}
+	if got := strings.Count(out, "\r\n"); got != 24 {
+		t.Fatalf("expected home view to use fixed 80x24 frame, got %d rows", got)
+	}
+	if strings.Contains(out, "press enter to continue") {
+		t.Fatal("did not expect duplicate body continue prompt on splash")
+	}
+	for _, removed := range []string{"Instamart", "Food", "Reorder usuals", "Account"} {
+		if strings.Contains(out, removed) {
+			t.Fatalf("did not expect menu item %q on splash", removed)
+		}
+	}
+}
+
+func TestHomeViewRendersSelectedAddressReadiness(t *testing.T) {
+	ctx, cancel := renderCtx()
+	defer cancel()
+	v := tui.HomeView{Session: tui.HomeSessionState{
+		Authenticated:        true,
+		AddressStatus:        tui.HomeAddressSelected,
+		SelectedAddressIndex: 0,
+		Addresses:            []tui.HomeAddressOption{{ID: "addr-1", Label: "Home"}},
+	}}
+	var buf bytes.Buffer
+	if err := v.Render(ctx, &buf); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(buf.String(), "deploying to") || !strings.Contains(buf.String(), "Home") {
+		t.Fatalf("expected selected address readiness, got %q", buf.String())
+	}
+}
+
+func TestHomeAddressPickerDoesNotRenderFullAddress(t *testing.T) {
+	ctx, cancel := renderCtx()
+	defer cancel()
+	v := tui.HomeView{
+		Session: tui.HomeSessionState{
+			Authenticated:        true,
+			AddressStatus:        tui.HomeAddressSelected,
+			SelectedAddressIndex: 0,
+			Addresses: []tui.HomeAddressOption{{
+				ID:          "addr-1",
+				Label:       "Home",
+				DisplayLine: "Flat 42, Secret Street, Bengaluru",
+				PhoneMasked: "****6438",
+			}},
+		},
+		In: strings.NewReader("\r3"),
+	}
+	var buf bytes.Buffer
+	if err := v.Render(ctx, &buf); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"Home", "****6438", "Flat 42"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in address picker output", want)
+		}
+	}
+	if strings.Contains(out, "Secret Street") || strings.Contains(out, "Bengaluru") {
+		t.Fatalf("full address must not render in root address picker: %q", out)
+	}
+}
+
+func TestHomeViewRendersMenuItemsAfterContinue(t *testing.T) {
+	ctx, cancel := renderCtx()
+	defer cancel()
+	v := tui.HomeView{In: strings.NewReader("\r")}
+	var buf bytes.Buffer
+	if err := v.Render(ctx, &buf); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+
+	for _, want := range []string{"Instamart", "Food", "swiggy.ai", "coming soon", "j/k move"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in HomeView menu output", want)
+		}
+	}
+	for _, removed := range []string{"Reorder usuals", "Account", "press enter to continue"} {
+		if strings.Contains(out, removed) {
+			t.Fatalf("did not expect %q in menu output", removed)
+		}
+	}
+	if got := strings.Count(out, "\r\n"); got != 24 {
+		t.Fatalf("expected menu to use fixed 80x24 frame, got %d rows", got)
 	}
 }
 

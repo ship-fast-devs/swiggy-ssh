@@ -16,8 +16,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const cancellationGuidance = "To cancel your order, please call Swiggy customer care at 080-67466729."
-
 const searchPreviewDebounce = 350 * time.Millisecond
 
 var searchSpinnerFrames = []string{"|", "/", "-", "\\"}
@@ -68,11 +66,26 @@ type InstamartView struct {
 
 // InstamartAppView renders the service-backed Instamart flow.
 type InstamartAppView struct {
-	Service       InstamartService
-	UserID        string
-	StatusMessage string
-	Viewport      Viewport
-	In            io.Reader
+	Service         InstamartService
+	UserID          string
+	Addresses       []domaininstamart.Address
+	SelectedAddress domaininstamart.Address
+	StartTracking   bool
+	StatusMessage   string
+	Viewport        Viewport
+	In              io.Reader
+}
+
+type InstamartAction int
+
+const (
+	InstamartActionQuit InstamartAction = iota
+	InstamartActionBackToHome
+)
+
+type InstamartResult struct {
+	Action          InstamartAction
+	SelectedAddress domaininstamart.Address
 }
 
 type instamartScreen int
@@ -96,18 +109,15 @@ const (
 )
 
 type instamartHomeChoice struct {
+	icon   string
 	label  string
 	action string
 }
 
 var instamartHomeChoices = []instamartHomeChoice{
-	{label: "grep products", action: "search"},
-	{label: "recent cache", action: "goto"},
-	{label: "staged cart", action: "cart"},
-	{label: "tail active order", action: "track"},
-	{label: "deploy history", action: "orders"},
-	{label: "Cancel order help", action: "cancel"},
-	{label: "switch target address", action: "address"},
+	{icon: "⌕", label: "grep products", action: "search"},
+	{icon: "↺", label: "recent cache", action: "goto"},
+	{icon: "▦", label: "staged cart", action: "cart"},
 }
 
 type productVariationRow struct {
@@ -163,6 +173,8 @@ type instamartModel struct {
 	checkoutElapsed time.Duration
 	orders          domaininstamart.OrderHistory
 	tracking        domaininstamart.TrackingStatus
+	result          InstamartResult
+	startTracking   bool
 }
 
 type instamartAddressesMsg struct {
@@ -218,7 +230,10 @@ type instamartTrackingMsg struct {
 }
 
 func (m instamartModel) Init() tea.Cmd {
-	if m.service == nil || m.screen == instamartScreenStatic {
+	if m.startTracking {
+		return tea.Batch(ctxQuitCmd(m.ctx), m.loadOrdersCmd(true))
+	}
+	if m.service == nil || m.screen == instamartScreenStatic || m.screen == instamartScreenHome {
 		return ctxQuitCmd(m.ctx)
 	}
 	return tea.Batch(ctxQuitCmd(m.ctx), m.loadAddressesCmd())
@@ -374,6 +389,7 @@ func clearOnScreenChange(previous instamartScreen, model tea.Model, cmd tea.Cmd)
 func (m instamartModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	if key == "ctrl+c" || key == "q" {
+		m.result.Action = InstamartActionQuit
 		return m, tea.Quit
 	}
 	if key == "?" && m.screen != instamartScreenHelp {
@@ -388,6 +404,13 @@ func (m instamartModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleHelpKey(key)
 	}
 	if key == "esc" {
+		if m.screen == instamartScreenHome {
+			m.result.Action = InstamartActionBackToHome
+			if m.selectedAddress != nil {
+				m.result.SelectedAddress = *m.selectedAddress
+			}
+			return m, tea.Quit
+		}
 		if m.screen == instamartScreenCheckoutConfirm {
 			return m.handleCheckoutConfirmKey(key)
 		}
@@ -396,6 +419,9 @@ func (m instamartModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.err = ""
 			m.status = ""
 			return m, nil
+		}
+		if m.shouldReturnToRootHome() {
+			return m.returnToRootHome()
 		}
 		m.screen = instamartScreenHome
 		m.err = ""
@@ -422,12 +448,35 @@ func (m instamartModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleOrdersKey(key)
 	case instamartScreenOrderResult, instamartScreenTracking, instamartScreenMessage:
 		if key == "enter" || key == "b" || key == "h" {
+			if m.shouldReturnToRootHome() {
+				return m.returnToRootHome()
+			}
 			m.screen = instamartScreenHome
 			m.err = ""
 			return m, nil
 		}
 	}
 	return m, nil
+}
+
+func (m instamartModel) shouldReturnToRootHome() bool {
+	if !m.startTracking {
+		return false
+	}
+	switch m.screen {
+	case instamartScreenOrderResult, instamartScreenTracking, instamartScreenMessage:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m instamartModel) returnToRootHome() (tea.Model, tea.Cmd) {
+	m.result.Action = InstamartActionBackToHome
+	if m.selectedAddress != nil {
+		m.result.SelectedAddress = *m.selectedAddress
+	}
+	return m, tea.Quit
 }
 
 func (m instamartModel) handleStaticKey(key string) (tea.Model, tea.Cmd) {
@@ -493,10 +542,6 @@ func (m instamartModel) handleHomeKey(key string) (tea.Model, tea.Cmd) {
 		return m.startSearch(), nil
 	case "c":
 		return m.runHomeAction("cart")
-	case "a":
-		m.screen = instamartScreenAddressSelect
-		m.cursor = 0
-		return m, nil
 	case "enter":
 		return m.runHomeAction(instamartHomeChoices[m.homeCursor].action)
 	default:
@@ -533,16 +578,6 @@ func (m instamartModel) runHomeAction(action string) (tea.Model, tea.Cmd) {
 		m.screen = instamartScreenLoading
 		m.loading = "Loading deploy history..."
 		return m, m.loadOrdersCmd(false)
-	case "cancel":
-		m.screen = instamartScreenMessage
-		m.message = cancellationGuidance
-		m.status = ""
-		m.err = ""
-		return m, nil
-	case "address":
-		m.screen = instamartScreenAddressSelect
-		m.cursor = 0
-		return m, nil
 	}
 	return m, nil
 }
@@ -955,21 +990,51 @@ func (v InstamartView) Render(ctx context.Context, w io.Writer) error {
 }
 
 func (v InstamartAppView) Render(ctx context.Context, w io.Writer) error {
+	_, err := v.RenderWithResult(ctx, w)
+	return err
+}
+
+func (v InstamartAppView) RenderWithResult(ctx context.Context, w io.Writer) (InstamartResult, error) {
 	ctx = domainauth.ContextWithUserID(ctx, v.UserID)
+	addresses := append([]domaininstamart.Address(nil), v.Addresses...)
+	var selectedAddress *domaininstamart.Address
+	if strings.TrimSpace(v.SelectedAddress.ID) != "" {
+		selected := v.SelectedAddress
+		selectedAddress = &selected
+		if len(addresses) == 0 {
+			addresses = []domaininstamart.Address{selected}
+		}
+	}
 	m := instamartModel{
-		ctx:      ctx,
-		service:  v.Service,
-		viewport: v.Viewport,
-		screen:   instamartScreenLoadingAddresses,
-		status:   v.StatusMessage,
-		quantity: 1,
+		ctx:             ctx,
+		service:         v.Service,
+		viewport:        v.Viewport,
+		screen:          instamartScreenHome,
+		status:          v.StatusMessage,
+		quantity:        1,
+		addresses:       addresses,
+		selectedAddress: selectedAddress,
+		startTracking:   v.StartTracking,
+	}
+	if v.StartTracking {
+		m.screen = instamartScreenLoading
+		m.loading = "Looking for active orders..."
+	}
+	if selectedAddress == nil && !v.StartTracking {
+		m.err = "Choose a deployment address from the main menu."
 	}
 	if v.Service == nil {
 		m.screen = instamartScreenMessage
 		m.err = "Instamart is unavailable in this session."
 	}
-	_, err := runInteractive(m, w, v.In)
-	return err
+	finalModel, err := runInteractive(m, w, v.In)
+	if err != nil {
+		return InstamartResult{}, err
+	}
+	if hm, ok := finalModel.(instamartModel); ok {
+		return hm.result, nil
+	}
+	return InstamartResult{}, nil
 }
 
 func flattenProductRows(products []domaininstamart.Product) []productVariationRow {

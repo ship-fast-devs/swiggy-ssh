@@ -19,6 +19,31 @@ POST https://mcp.swiggy.com/food
 
 This skill only documents tool names, arguments, workflows, response shapes, and safety gates.
 
+## swiggy-ssh Session Address Model
+
+In `swiggy-ssh`, saved address selection is session-level, not Food-specific.
+
+Home behavior:
+
+- If the user is unauthenticated, Home must show `auth required` instead of generic connected SSH state.
+- After auth succeeds, fetch saved addresses for the terminal session and cache them in session state.
+- Auto-select the first returned saved address as the session delivery target.
+- Home must show `deploying to <label>` for the selected delivery address.
+- Food and Instamart must reuse the selected session address by default.
+- Do not force address selection inside each vertical when a session address already exists.
+- Manual address switching remains available from the app shell/session UI and may re-fetch addresses before showing the chooser.
+- Never guess, invent, hard-code, or synthesize address IDs. The selected address ID must come from `get_addresses`.
+
+The selected address should be carried as session state with at least:
+
+```text
+addressId
+label/display text
+full address details needed for checkout confirmation
+```
+
+Checkout still must display the final delivery address and require explicit confirmation before placing an order.
+
 List tools:
 
 ```json
@@ -45,19 +70,31 @@ Call a tool:
 
 ## Workflow Tree
 
-1. `get_addresses`
-2. Show saved addresses and stop until the user selects one. Never guess or invent `addressId`.
-3. `search_restaurants` with `addressId`, `query`, optional `offset`
-4. Pick an `OPEN` restaurant and persist `restaurantId` and `restaurantName`
-5. Browse with `get_restaurant_menu` or search a dish with `search_menu`
-6. For customized items, choose variants/addons from `search_menu`
-7. `update_food_cart`
-8. `get_food_cart`
-9. Optional: `fetch_food_coupons` then `apply_food_coupon` if a COD-compatible valid coupon exists
-10. Show full cart, available payment methods, and delivery address
-11. Require explicit confirmation
-12. `place_food_order`
-13. `track_food_order` and/or `get_food_orders`
+1. Ensure the user is authenticated.
+2. If unauthenticated, render Home as `auth required` and route the user through auth before Food actions.
+3. After auth succeeds, call `get_addresses` for the terminal session and cache the returned addresses.
+4. Auto-select the first returned address as the session delivery target. Never invent an `addressId`.
+5. Render Home with `deploying to <label>`.
+6. Food uses the session-selected `addressId` for restaurant search, menu search, cart, coupons, order history, and checkout.
+7. `search_restaurants` with session `addressId`, `query`, optional `offset`.
+8. Pick an `OPEN` restaurant and persist `restaurantId` and `restaurantName`.
+9. Browse with `get_restaurant_menu` or search a dish with `search_menu`.
+10. For customized items, choose variants/addons from `search_menu`.
+11. `update_food_cart`.
+12. Immediately call `get_food_cart`.
+13. Optional: `fetch_food_coupons` then `apply_food_coupon` if the response explicitly shows a COD-compatible valid coupon.
+14. Show full cart, available payment methods, bill total, and final delivery address.
+15. Require explicit user confirmation.
+16. `place_food_order`.
+17. `track_food_order` and/or `get_food_orders`.
+
+Manual address switching:
+
+1. User explicitly opens address switcher.
+2. Reuse cached addresses or call `get_addresses` again if the cache is missing/stale.
+3. Let the user select one.
+4. Update the session delivery target.
+5. Reuse the updated session address for Food and Instamart.
 
 Important: each food menu item uses either legacy `variants` or `variantsV2`. Use the same format returned by `search_menu`; do not mix both.
 
@@ -68,6 +105,36 @@ Addon flow for customized items:
 3. Read `valid_addons` for the chosen variant.
 4. Add only valid addon choices and respect min/max constraints.
 5. Call `get_food_cart` again immediately after the addon update so the caller has the real cart state.
+
+## swiggy-ssh Architecture Placement
+
+Keep Food ordering client-agnostic and follow the repo's Clean Architecture boundaries.
+
+Recommended placement:
+
+| Concern | Package |
+|---|---|
+| Food entities, errors, and ports | `internal/domain/food` |
+| Food orchestration use cases | `internal/application/food` |
+| Swiggy Food MCP/provider adapter | `internal/infrastructure/provider/swiggy` or a Food-specific provider subpackage |
+| SSH session routing | `internal/presentation/ssh` |
+| Bubbletea screens and input handling | `internal/presentation/tui` |
+| Concrete wiring | `cmd/swiggy-ssh/main.go` |
+
+Session address ownership:
+
+- The authenticated terminal session owns the selected delivery address.
+- Food and Instamart should receive the selected address from session/application state.
+- Food use cases should accept an `addressId` from trusted session state, not ask the vertical UI to rediscover or invent one.
+- Presentation may render address labels and collect manual switch input.
+- Application code should enforce checkout sequencing: cart summary, final address, payment method, explicit confirmation, then order placement.
+
+Boundary rules:
+
+- `internal/presentation/*` must not import `internal/infrastructure/*`.
+- `internal/application/*` must depend only on domain ports.
+- The Swiggy MCP client is infrastructure.
+- `cmd/swiggy-ssh/main.go` is the wiring point for concrete Food provider implementations.
 
 ## Tool Catalog
 
@@ -81,7 +148,7 @@ Addon flow for customized items:
 | `update_food_cart` | Adds/updates cart items, variants, and addons. | `restaurantId`, `cartItems`, `addressId` | `restaurantName` | `cartItems[]` requires `menu_item_id`, `quantity`; variants/addons depend on `search_menu`. |
 | `flush_food_cart` | Clears the Food cart. | - | - | Use for cleanup or explicit empty-cart action. |
 | `place_food_order` | Places a real Food delivery order. | `addressId` | `paymentMethod` | Only after `get_food_cart`, address/payment/total display, and explicit confirmation. |
-| `fetch_food_coupons` | Fetches coupons/offers for a restaurant/address. | `restaurantId`, `addressId` | `couponCode` | Use before checkout; only recommend COD-compatible coupons. |
+| `fetch_food_coupons` | Fetches coupons/offers for a restaurant/address. | `restaurantId`, `addressId` | `couponCode` | Use before checkout; only recommend coupons the response marks as compatible with the selected payment flow. |
 | `apply_food_coupon` | Applies a coupon to Food cart. | `couponCode`, `addressId` | `cartId` | Use only with a valid coupon code. |
 | `get_food_orders` | Gets Food order history or active orders. | `addressId` | `activeOnly` | Leave `activeOnly=false` for generic history. Set `activeOnly=true` only for active/current/ongoing orders. |
 | `get_food_order_details` | Gets detailed Food order information. | `orderId` | - | Use with an order id from `get_food_orders`. |
@@ -92,7 +159,7 @@ Addon flow for customized items:
 
 ### `get_addresses`
 
-Use first for Food delivery. The response contains saved address IDs and display details, but no coordinates. Show the list to the user and ask which address to use before calling restaurant/menu/cart tools.
+Use after auth to populate session address state. The response contains saved address IDs and display details, but no coordinates. In `swiggy-ssh`, auto-select the first returned address for the session and show `deploying to <label>` in Home. Only show the list when the user explicitly opens address switching.
 
 Do not guess, invent, or hard-code `addressId`.
 
@@ -189,8 +256,6 @@ Call used with a simple item without variants/addons:
     {
       "menu_item_id": "163982423",
       "quantity": 1,
-      "variants": [],
-      "variantsV2": [],
       "addons": []
     }
   ]
@@ -228,11 +293,13 @@ TO PAY: ₹160
 Payment methods: Cash
 ```
 
-Checkout precondition: display items, totals, payment methods, and delivery address before `place_food_order`.
+Checkout precondition: display items, final payable total, payment methods, and delivery address before `place_food_order`.
 
 Use only payment methods returned by `get_food_cart`. Do not mention or assume payment methods not present in the response.
 
 If cart offers show `coupon_applied` with `coupon_discount=0`, treat it as an auto-suggested coupon, not an applied discount. Do not claim savings unless discount is greater than zero.
+
+Only recommend a coupon when its applicability/payment metadata clearly matches the selected payment flow. If COD/Cash compatibility is unclear, show it as informational only and do not auto-apply it.
 
 ### `fetch_food_coupons`
 
@@ -300,9 +367,14 @@ Flushed Food cart successfully
 ## Safety Rules
 
 - Never store or log full phone numbers, full addresses, precise coordinates, or real order IDs unless required and protected.
+- Session auto-selection may choose only the first address returned by `get_addresses`; it must not create, infer, or hard-code an address ID.
+- Food and Instamart may reuse the session-selected address, but checkout must still show the final address before order placement.
+- Manual address switching must use IDs returned by `get_addresses`.
+- If `get_addresses` returns no addresses, do not continue into Food ordering. Tell the user they need to add a saved Swiggy address first.
+- If the selected session address is missing or stale, call `get_addresses` again and require a valid returned address before Food actions.
 - `place_food_order` creates a real Food delivery order. Call it only after the user has seen final address, items, bill total, and payment method, then explicitly confirms.
 - Only use payment methods returned by `get_food_cart`.
-- Do not place Food orders with cart value `₹1000` or more; direct the user to the Swiggy app.
+- Do not place Food orders with final payable cart value `₹1000` or more; direct the user to the Swiggy app.
 - On successful order placement, show the returned message as-is. Do not rephrase Swiggy-branded success text.
 - For cancellation requests, do not call MCP tools. Tell the user exactly: "To cancel your order, please call Swiggy customer care at 080-67466729."
 

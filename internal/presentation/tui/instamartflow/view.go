@@ -172,7 +172,7 @@ func (m instamartModel) footer() string {
 	case instamartScreenAddressSelect:
 		return footerLine(KeyHint{Key: "j/k", Label: "move"}, KeyHint{Key: "1-9", Label: "select"}, KeyHint{Key: "?", Label: "help"}, KeyHint{Key: "q", Label: "quit"})
 	case instamartScreenHome, instamartScreenStatic:
-		return footerLine(KeyHint{Key: "j/k", Label: "move"}, KeyHint{Key: "1-7", Label: "select"}, KeyHint{Key: "/", Label: "grep"}, KeyHint{Key: "c", Label: "cart"}, KeyHint{Key: "?", Label: "help"}, KeyHint{Key: "q", Label: "quit"})
+		return footerLine(KeyHint{Key: "j/k", Label: "move"}, KeyHint{Key: "1-3", Label: "select"}, KeyHint{Key: "/", Label: "grep"}, KeyHint{Key: "c", Label: "cart"}, KeyHint{Key: "esc", Label: "main"}, KeyHint{Key: "q", Label: "quit"})
 	case instamartScreenSearchInput:
 		return footerLine(KeyHint{Key: "enter", Label: "open results"}, KeyHint{Key: "esc", Label: "home"}, KeyHint{Key: "?", Label: "help"}, KeyHint{Key: "q", Label: "quit"})
 	case instamartScreenProductList:

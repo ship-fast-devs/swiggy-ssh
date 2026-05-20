@@ -3,6 +3,8 @@ package instamartflow
 import (
 	"fmt"
 	"strings"
+
+	domaininstamart "swiggy-ssh/internal/domain/instamart"
 )
 
 func (m instamartModel) renderOrders(sb *strings.Builder) {
@@ -16,7 +18,7 @@ func (m instamartModel) renderOrders(sb *strings.Builder) {
 		if order.Active {
 			active = " · active"
 		}
-		label := fmt.Sprintf("%d. %s · %d items · Rs %d%s", i+1, order.Status, order.ItemCount, order.TotalRupees, active)
+		label := fmt.Sprintf("%s  %s · %d items · Rs %d%s", orderIcon(order), order.Status, order.ItemCount, order.TotalRupees, active)
 		if m.cursor == i {
 			sb.WriteString(line(cursorStyle.Render("> ") + boldStyle.Render(label)))
 		} else {
@@ -27,6 +29,13 @@ func (m instamartModel) renderOrders(sb *strings.Builder) {
 		sb.WriteString(line(""))
 		sb.WriteString(line(" Tracking is unavailable for this order in the terminal. Please check the Swiggy Instamart app."))
 	}
+}
+
+func orderIcon(order domaininstamart.OrderSummary) string {
+	if order.Active {
+		return "◷"
+	}
+	return "✓"
 }
 
 func (m instamartModel) renderTracking(sb *strings.Builder) {

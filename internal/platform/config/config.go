@@ -13,6 +13,7 @@ const (
 	defaultAppEnv                 = "local"
 	defaultSwiggyProvider         = "mock"
 	defaultSwiggyMCPIMEndpoint    = "https://mcp.swiggy.com/im"
+	defaultSwiggyMCPFoodEndpoint  = "https://mcp.swiggy.com/food"
 	defaultSwiggyAuthAuthorizeURL = "https://mcp.swiggy.com/auth/authorize"
 	defaultSwiggyAuthTokenURL     = "https://mcp.swiggy.com/auth/token"
 	defaultSwiggyClientID         = "swiggy-mcp"
@@ -35,6 +36,7 @@ type Config struct {
 	AppEnv                 string
 	SwiggyProvider         string
 	SwiggyMCPIMEndpoint    string
+	SwiggyMCPFoodEndpoint  string
 	SwiggyLoginStartURL    string
 	SwiggyAuthAuthorizeURL string
 	SwiggyAuthTokenURL     string
@@ -56,6 +58,7 @@ func Load() Config {
 		AppEnv:                 envOrDefault("APP_ENV", defaultAppEnv),
 		SwiggyProvider:         envOrDefault("SWIGGY_PROVIDER", defaultSwiggyProvider),
 		SwiggyMCPIMEndpoint:    envOrDefault("SWIGGY_MCP_IM_ENDPOINT", defaultSwiggyMCPIMEndpoint),
+		SwiggyMCPFoodEndpoint:  envOrDefault("SWIGGY_MCP_FOOD_ENDPOINT", defaultSwiggyMCPFoodEndpoint),
 		SwiggyLoginStartURL:    envOrDefault("SWIGGY_LOGIN_START_URL", ""),
 		SwiggyAuthAuthorizeURL: envOrDefault("SWIGGY_AUTH_AUTHORIZE_URL", defaultSwiggyAuthAuthorizeURL),
 		SwiggyAuthTokenURL:     envOrDefault("SWIGGY_AUTH_TOKEN_URL", defaultSwiggyAuthTokenURL),
@@ -88,6 +91,13 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.SwiggyClientID) == "" {
 		return errors.New("SWIGGY_CLIENT_ID is required when SWIGGY_PROVIDER is not mock")
+	}
+	foodEndpoint := strings.TrimSpace(c.SwiggyMCPFoodEndpoint)
+	if foodEndpoint == "" {
+		foodEndpoint = defaultSwiggyMCPFoodEndpoint
+	}
+	if err := validateHTTPURL("SWIGGY_MCP_FOOD_ENDPOINT", foodEndpoint); err != nil {
+		return err
 	}
 	if err := validateHTTPURL("SWIGGY_AUTH_AUTHORIZE_URL", c.SwiggyAuthAuthorizeURL); err != nil {
 		return err

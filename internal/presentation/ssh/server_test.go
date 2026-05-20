@@ -11,6 +11,8 @@ import (
 
 	applicationauth "swiggy-ssh/internal/application/auth"
 	applicationidentity "swiggy-ssh/internal/application/identity"
+	domainfood "swiggy-ssh/internal/domain/food"
+	domaininstamart "swiggy-ssh/internal/domain/instamart"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -196,6 +198,37 @@ func TestServerConfigAcceptsNoClientKey(t *testing.T) {
 
 	if err := <-serverDone; err != nil {
 		t.Fatalf("server handshake: %v", err)
+	}
+}
+
+func TestFoodAddressForSelectedUsesFoodSpecificAddressID(t *testing.T) {
+	selected := domaininstamart.Address{
+		ID:          "im-address-1",
+		Label:       "Home",
+		DisplayLine: "Test Area",
+		Category:    "Home",
+		PhoneMasked: "****3210",
+	}
+	foodAddresses := []domainfood.Address{
+		{ID: "food-address-1", Label: "Home", DisplayLine: "Test Area", Category: "Home", PhoneMasked: "****3210"},
+	}
+
+	address, ok := foodAddressForSelected(foodAddresses, selected)
+	if !ok {
+		t.Fatal("expected matching food address")
+	}
+	if address.ID != "food-address-1" {
+		t.Fatalf("expected food-specific address ID, got %q", address.ID)
+	}
+}
+
+func TestFoodAddressForSelectedDoesNotGuessWhenSelectionCannotBeMatched(t *testing.T) {
+	selected := domaininstamart.Address{ID: "im-address-2", Label: "Office"}
+	foodAddresses := []domainfood.Address{{ID: "food-address-1", Label: "Home"}}
+
+	_, ok := foodAddressForSelected(foodAddresses, selected)
+	if ok {
+		t.Fatal("must not guess a Food address when the selected address cannot be matched")
 	}
 }
 

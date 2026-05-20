@@ -71,8 +71,9 @@ type jsonRPCError struct {
 }
 
 type mcpToolResult struct {
-	Content []mcpToolContent `json:"content"`
-	IsError bool             `json:"isError,omitempty"`
+	Content           []mcpToolContent `json:"content"`
+	StructuredContent json.RawMessage  `json:"structuredContent,omitempty"`
+	IsError           bool             `json:"isError,omitempty"`
 }
 
 type mcpToolContent struct {

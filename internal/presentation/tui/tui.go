@@ -51,6 +51,7 @@ var (
 	cursorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#FC8019")).Bold(true) // orange + bold
 	codeStyle    = lipgloss.NewStyle().Bold(true)
 	connStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA44")) // green
+	shineStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB15C")).Bold(true)
 )
 
 func gradientRender(content string, colors []string, index, total int) string {
@@ -114,6 +115,7 @@ func init() {
 //	└ + 78×─ + ┘
 
 const innerWidth = 78
+const fixedFrameBodyRows = 18
 
 func top() string {
 	return "┌" + strings.Repeat("─", innerWidth) + "┐\r\n"
@@ -157,9 +159,33 @@ func centeredLine(content string) string {
 	return "│" + strings.Repeat(" ", leftPad) + content + strings.Repeat(" ", rightPad) + "│\r\n"
 }
 
+func fixedBody(content string, rows int) string {
+	if rows <= 0 {
+		return ""
+	}
+	trimmed := strings.TrimSuffix(content, "\r\n")
+	lines := []string{}
+	if trimmed != "" {
+		lines = strings.Split(trimmed, "\r\n")
+	}
+	if len(lines) > rows {
+		lines = lines[:rows]
+	}
+	var sb strings.Builder
+	for _, rendered := range lines {
+		sb.WriteString(rendered)
+		sb.WriteString("\r\n")
+	}
+	for i := len(lines); i < rows; i++ {
+		sb.WriteString(line(""))
+	}
+	return sb.String()
+}
+
 type KeyHint struct {
-	Key   string
-	Label string
+	Key       string
+	Label     string
+	Highlight bool
 }
 
 func footerLine(hints ...KeyHint) string {
@@ -168,9 +194,14 @@ func footerLine(hints ...KeyHint) string {
 		if hint.Key == "" || hint.Label == "" {
 			continue
 		}
-		parts = append(parts, hint.Key+" "+hint.Label)
+		text := hint.Key + " " + hint.Label
+		if hint.Highlight {
+			parts = append(parts, brandStyle.Render(text))
+		} else {
+			parts = append(parts, mutedStyle.Render(text))
+		}
 	}
-	return centeredLine(mutedStyle.Render(strings.Join(parts, "    ")))
+	return centeredLine(strings.Join(parts, "    "))
 }
 
 // headerLine builds a line with left and right text separated by spaces, filling

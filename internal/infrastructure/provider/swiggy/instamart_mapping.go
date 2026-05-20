@@ -2,6 +2,7 @@ package swiggy
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -18,6 +19,23 @@ func (s *flexibleString) UnmarshalJSON(data []byte) error {
 	var text string
 	if err := json.Unmarshal(data, &text); err == nil {
 		*s = flexibleString(text)
+		return nil
+	}
+	var texts []string
+	if err := json.Unmarshal(data, &texts); err == nil {
+		*s = flexibleString(strings.Join(texts, ", "))
+		return nil
+	}
+	var values []any
+	if err := json.Unmarshal(data, &values); err == nil {
+		parts := make([]string, 0, len(values))
+		for _, value := range values {
+			part := strings.TrimSpace(fmt.Sprint(value))
+			if part != "" {
+				parts = append(parts, part)
+			}
+		}
+		*s = flexibleString(strings.Join(parts, ", "))
 		return nil
 	}
 	var number json.Number

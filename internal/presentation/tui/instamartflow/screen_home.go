@@ -1,13 +1,10 @@
 package instamartflow
 
-import (
-	"fmt"
-	"strings"
-)
+import "strings"
 
 func (m instamartModel) renderStatic(sb *strings.Builder) {
-	for i, choice := range instamartHomeChoices[:5] {
-		label := fmt.Sprintf("%d. %s", i+1, choice.label)
+	for i, choice := range instamartHomeChoices {
+		label := instamartHomeChoiceLabel(choice)
 		if m.cursor == i {
 			sb.WriteString(line(cursorStyle.Render("> ") + boldStyle.Render(label)))
 		} else {
@@ -20,7 +17,7 @@ func (m instamartModel) renderAddresses(sb *strings.Builder) {
 	sb.WriteString(line(brandStyle.Render(" select deployment address")))
 	sb.WriteString(line(""))
 	for i, address := range m.addresses {
-		label := fmt.Sprintf("%d. %s", i+1, addressLabel(address))
+		label := "⌂  " + addressLabel(address)
 		if address.PhoneMasked != "" {
 			label += " · " + address.PhoneMasked
 		}
@@ -34,11 +31,14 @@ func (m instamartModel) renderAddresses(sb *strings.Builder) {
 }
 
 func (m instamartModel) renderHome(sb *strings.Builder) {
+	sb.WriteString(line(brandStyle.Render(" What would you like to deploy?")))
 	if m.selectedAddress == nil {
 		sb.WriteString(line(" Choose an address before searching or checkout."))
+	} else {
+		sb.WriteString(line(""))
 	}
 	for i, choice := range instamartHomeChoices {
-		label := fmt.Sprintf("%d. %s", i+1, choice.label)
+		label := instamartHomeChoiceLabel(choice)
 		if m.homeCursor == i {
 			sb.WriteString(line(cursorStyle.Render("> ") + boldStyle.Render(label)))
 		} else {
@@ -58,4 +58,11 @@ func (m instamartModel) renderHelp(sb *strings.Builder) {
 	sb.WriteString(line(" p          ship from cart"))
 	sb.WriteString(line(" b          back home"))
 	sb.WriteString(line(" q          quit"))
+}
+
+func instamartHomeChoiceLabel(choice instamartHomeChoice) string {
+	if strings.TrimSpace(choice.icon) == "" {
+		return choice.label
+	}
+	return choice.icon + "  " + choice.label
 }

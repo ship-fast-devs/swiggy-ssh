@@ -20,7 +20,7 @@ func TestStartShutdownClosesHalfOpenConnections(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	server := New(addr, hostKeyPath, logger, nil, nil, nil, nil, nil, "", nil, nil)
+	server := New(addr, hostKeyPath, logger, nil, nil, nil, nil, nil, "", nil, nil, nil)
 	done := make(chan error, 1)
 	go func() {
 		done <- server.Start(ctx)

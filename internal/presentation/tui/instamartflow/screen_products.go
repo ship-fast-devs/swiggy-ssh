@@ -12,9 +12,6 @@ const productListRows = 9
 
 func (m instamartModel) renderSearch(sb *strings.Builder) {
 	sb.WriteString(line(brandStyle.Render(" grep products")))
-	if !m.searchPreviewLoaded || m.searchPreviewQuery != m.searchQuery {
-		sb.WriteString(line(mutedStyle.Render(" preview · enter opens results")))
-	}
 	sb.WriteString(line(""))
 	sb.WriteString(line(" query: " + boldStyle.Render(m.searchQuery) + cursorStyle.Render("_")))
 
@@ -46,7 +43,7 @@ func (m instamartModel) renderSearch(sb *strings.Builder) {
 }
 
 func renderPreviewProductTable(sb *strings.Builder, rows []productVariationRow, limit int) {
-	sb.WriteString(line("   item                         pack      price"))
+	sb.WriteString(line("   type item                         pack      price"))
 	for i, row := range rows {
 		if limit > 0 && i >= limit {
 			break
@@ -69,7 +66,7 @@ func productPreviewRow(row productVariationRow) string {
 	if !productRowAvailable(row) {
 		price = "[x] unavailable"
 	}
-	return fmt.Sprintf("%-28s %-9s %s", truncateTerminal(name, 28), truncateTerminal(pack, 9), price)
+	return fmt.Sprintf("%-4s %-28s %-9s %s", productRowIcon(row), truncateTerminal(name, 28), truncateTerminal(pack, 9), price)
 }
 
 func (m instamartModel) renderProducts(sb *strings.Builder) {
@@ -92,7 +89,7 @@ func (m instamartModel) renderProducts(sb *strings.Builder) {
 }
 
 func renderProductTable(sb *strings.Builder, rows []productVariationRow, cursor, limit int) {
-	sb.WriteString(line("   #   item                         pack      price"))
+	sb.WriteString(line("   type item                         pack      price"))
 	start := productWindowStart(cursor, len(rows), limit)
 	end := len(rows)
 	if limit > 0 && start+limit < end {
@@ -112,7 +109,7 @@ func renderProductTable(sb *strings.Builder, rows []productVariationRow, cursor,
 	}
 }
 
-func productTableRow(index int, row productVariationRow) string {
+func productTableRow(_ int, row productVariationRow) string {
 	name := defaultString(row.Variation.DisplayName, row.Product.DisplayName)
 	if row.Product.Promoted {
 		name = "[ad] " + name
@@ -122,7 +119,17 @@ func productTableRow(index int, row productVariationRow) string {
 	if !productRowAvailable(row) {
 		price = "[x] unavailable"
 	}
-	return fmt.Sprintf("%-3d %-28s %-9s %s", index+1, truncateTerminal(name, 28), truncateTerminal(pack, 9), price)
+	return fmt.Sprintf("%-4s %-28s %-9s %s", productRowIcon(row), truncateTerminal(name, 28), truncateTerminal(pack, 9), price)
+}
+
+func productRowIcon(row productVariationRow) string {
+	if !productRowAvailable(row) {
+		return "×"
+	}
+	if row.Product.Promoted {
+		return "◆"
+	}
+	return "▦"
 }
 
 func productWindowStart(cursor, total, limit int) int {
