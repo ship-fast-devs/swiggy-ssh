@@ -16,7 +16,10 @@ func (m foodModel) renderMenuBrowse(sb *strings.Builder) {
 	} else if m.menuPage.RestaurantName != "" {
 		restName = " · " + m.menuPage.RestaurantName
 	}
-	sb.WriteString(line(brandStyle.Render(" menu"+restName)))
+	sb.WriteString(line(brandStyle.Render(" GET /food/restaurants/{restaurant_id}/menu 200 OK")))
+	if restName != "" {
+		sb.WriteString(line(mutedStyle.Render(" params.restaurant_id=" + m.selectedRestaurantID() + restName)))
+	}
 
 	items := m.allMenuItems()
 	if len(items) == 0 {
@@ -30,9 +33,9 @@ func (m foodModel) renderMenuBrowse(sb *strings.Builder) {
 		if end > len(items) {
 			end = len(items)
 		}
-		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" showing %d-%d of %d items · s to search", start+1, end, len(items)))))
+		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" response.items · showing %d-%d of %d · s searches dishes", start+1, end, len(items)))))
 	} else {
-		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" %d items · s to search", len(items)))))
+		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" response.items · %d items · s searches dishes", len(items)))))
 	}
 
 	renderMenuItemTable(sb, items, m.menuCursor, menuBrowseRows)
@@ -74,19 +77,20 @@ func menuItemTableRow(item domainfood.MenuItem) string {
 }
 
 func (m foodModel) renderMenuSearch(sb *strings.Builder) {
-	sb.WriteString(line(brandStyle.Render(" search dish")))
+	sb.WriteString(line(brandStyle.Render(" GET /food/dishes/search?query=$query" + m.dishSearchAPIStatus())))
 	sb.WriteString(line(""))
 	if m.selectedRestaurant != nil {
-		sb.WriteString(line(mutedStyle.Render(" searching in: " + m.selectedRestaurant.Name)))
+		sb.WriteString(line(mutedStyle.Render(" scope.restaurant_id=" + m.selectedRestaurant.ID + " · " + m.selectedRestaurant.Name)))
 	} else {
-		sb.WriteString(line(mutedStyle.Render(" searching across all restaurants")))
+		sb.WriteString(line(mutedStyle.Render(" scope.restaurant_id=<optional>")))
 	}
-	sb.WriteString(line(" query: " + boldStyle.Render(m.searchQuery) + cursorStyle.Render("_")))
+	sb.WriteString(line(" params.query: " + boldStyle.Render(m.searchQuery) + cursorStyle.Render("_")))
+	sb.WriteString(line(" params.address_id: " + boldStyle.Render(m.selectedAddressID())))
 
 	if m.searchPreviewLoading {
 		frame := foodSearchSpinnerFrames[m.searchPreviewSpinner%len(foodSearchSpinnerFrames)]
 		sb.WriteString(line(""))
-		sb.WriteString(line(" " + frame + " searching dishes..."))
+		sb.WriteString(line(" " + frame + " request in flight..."))
 		return
 	}
 	if m.searchPreviewErr != "" {
@@ -99,7 +103,7 @@ func (m foodModel) renderMenuSearch(sb *strings.Builder) {
 	}
 
 	sb.WriteString(line(""))
-	sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" preview · enter opens results · %d matches in %s", len(m.searchPreviewMenuItems), formatElapsed(m.searchPreviewElapsed)))))
+	sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" response preview · enter opens response.dishes · %d matches in %s", len(m.searchPreviewMenuItems), formatElapsed(m.searchPreviewElapsed)))))
 	if len(m.searchPreviewMenuItems) == 0 {
 		sb.WriteString(line(" No matching dishes found yet."))
 		return
@@ -108,6 +112,19 @@ func (m foodModel) renderMenuSearch(sb *strings.Builder) {
 	if len(m.searchPreviewMenuItems) > 4 {
 		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" ...and %d more", len(m.searchPreviewMenuItems)-4))))
 	}
+}
+
+func (m foodModel) dishSearchAPIStatus() string {
+	if m.searchPreviewLoading {
+		return mutedStyle.Render("  calling...")
+	}
+	if m.searchPreviewErr != "" {
+		return errorStyle.Render("  error")
+	}
+	if m.searchPreviewLoaded && m.searchPreviewQuery == m.searchQuery {
+		return mutedStyle.Render("  200 OK · " + formatElapsed(m.searchPreviewElapsed))
+	}
+	return ""
 }
 
 func renderPreviewMenuItemTable(sb *strings.Builder, items []domainfood.MenuItemDetail, limit int) {
@@ -139,16 +156,16 @@ func menuItemDetailPreviewRow(item domainfood.MenuItemDetail) string {
 }
 
 func (m foodModel) renderMenuResults(sb *strings.Builder) {
-	sb.WriteString(line(brandStyle.Render(" dish results")))
+	sb.WriteString(line(brandStyle.Render(" GET /food/dishes/search?query=$query 200 OK")))
 	if len(m.menuItems) > menuBrowseRows {
 		start := restaurantWindowStart(m.cursor, len(m.menuItems), menuBrowseRows)
 		end := start + menuBrowseRows
 		if end > len(m.menuItems) {
 			end = len(m.menuItems)
 		}
-		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" showing %d-%d of %d · + means has variants", start+1, end, len(m.menuItems)))))
+		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" response.dishes · showing %d-%d of %d · + means variants", start+1, end, len(m.menuItems)))))
 	} else {
-		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" %d dishes found · + means has variants", len(m.menuItems)))))
+		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" response.dishes · %d dishes · + means variants", len(m.menuItems)))))
 	}
 	renderMenuDetailTable(sb, m.menuItems, m.cursor, menuBrowseRows)
 }

@@ -25,7 +25,7 @@ func TestInstamartAddressSelectionRequiredBeforeSearch(t *testing.T) {
 	if got.screen != instamartScreenHome {
 		t.Fatalf("expected home screen, got %v", got.screen)
 	}
-	if !strings.Contains(got.err, "Choose a deployment address") {
+	if !strings.Contains(got.err, "Choose address_id") {
 		t.Fatalf("expected address error, got %q", got.err)
 	}
 }
@@ -154,7 +154,7 @@ func TestInstamartSearchPreviewStaysOnSearchScreen(t *testing.T) {
 		t.Fatalf("expected loaded preview rows, got query=%q loaded=%v rows=%d", got.searchPreviewQuery, got.searchPreviewLoaded, len(got.searchPreviewRows))
 	}
 	view := got.View()
-	if !strings.Contains(view, "preview · enter opens results") || strings.Contains(view, "searching...") {
+	if !strings.Contains(view, "response preview · enter opens response.products") || strings.Contains(view, "searching...") {
 		t.Fatalf("expected preview rendering without searching copy, got %q", got.View())
 	}
 	if strings.Contains(view, "grep products: milk") {
@@ -163,8 +163,8 @@ func TestInstamartSearchPreviewStaysOnSearchScreen(t *testing.T) {
 	if strings.Contains(view, cursorStyle.Render("> ")) || strings.Contains(view, "#   item") {
 		t.Fatalf("preview must not look selectable, got %q", view)
 	}
-	if !strings.Contains(view, "1 matches in 32ms") {
-		t.Fatalf("expected preview timing, got %q", got.View())
+	if !strings.Contains(view, "200 OK · 32ms") || strings.Contains(view, "matches in") {
+		t.Fatalf("expected timing beside API status only, got %q", got.View())
 	}
 }
 
@@ -184,12 +184,12 @@ func TestInstamartHomeUsesDeveloperCopyAndStatusBar(t *testing.T) {
 	m := instamartModel{screen: instamartScreenHome, selectedAddress: &address, intendedItems: []domaininstamart.CartUpdateItem{{SpinID: "spin-milk", Quantity: 3}}}
 	out := m.View()
 
-	for _, want := range []string{"grep products", "recent cache", "staged cart", "env=instamart  auth=ok  cart=3  mode=home"} {
+	for _, want := range []string{"Instamart API", "GET  /instamart/search", "GET  /instamart/products/recent", "GET  /instamart/cart", "GET  /instamart/orders", "context address_id: addr-1", "env=instamart  auth=ok  cart=3  mode=home"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected %q in home output", want)
 		}
 	}
-	for _, old := range []string{"Search products", "Your go-to items", "View cart", "Track active order", "tail active order", "deploy history", "Order history", "Change address", "switch target address", "Cancel order help", "Delivering to", "target locked", "deploying to:", "Cart:"} {
+	for _, old := range []string{"Search products", "Your go-to items", "View cart", "Track active order", "tail active order", "deploy history", "Order history", "Change address", "switch target address", "Cancel order help", "Delivering to", "target locked", "deploying to:", "Cart:", "grep products", "recent cache", "staged cart"} {
 		if strings.Contains(out, old) {
 			t.Fatalf("old copy %q should not be rendered", old)
 		}
@@ -200,11 +200,29 @@ func TestInstamartSearchPreviewLoadingUsesScanningIndexCopy(t *testing.T) {
 	m := instamartModel{screen: instamartScreenSearchInput, searchQuery: "milk", searchPreviewLoading: true}
 	out := m.View()
 
-	if !strings.Contains(out, "scanning index...") {
-		t.Fatalf("expected scanning index loader, got %q", out)
+	if !strings.Contains(out, "GET /instamart/search") || !strings.Contains(out, "calling...") {
+		t.Fatalf("expected API call status, got %q", out)
+	}
+	if !strings.Contains(out, "calling search endpoint...") {
+		t.Fatalf("expected search endpoint loader, got %q", out)
 	}
 	if strings.Contains(out, "searching...") || strings.Contains(out, "Searching") {
 		t.Fatalf("live preview loader must not use search copy, got %q", out)
+	}
+}
+
+func TestInstamartSearchPreviewDebounceRendersActiveCopy(t *testing.T) {
+	m := instamartModel{screen: instamartScreenSearchInput, searchQuery: "milk", searchPreviewDebouncing: true}
+	out := m.View()
+
+	if !strings.Contains(out, "GET /instamart/search") {
+		t.Fatalf("expected API template, got %q", out)
+	}
+	if !strings.Contains(out, "debounce active...") {
+		t.Fatalf("expected debounce active copy, got %q", out)
+	}
+	if strings.Contains(out, "calling search endpoint...") {
+		t.Fatalf("debounce copy should render before loader, got %q", out)
 	}
 }
 
@@ -215,6 +233,18 @@ func TestInstamartSearchPreviewIgnoresStaleResponses(t *testing.T) {
 
 	if got.searchPreviewLoaded || len(got.searchPreviewRows) != 0 {
 		t.Fatalf("stale preview should be ignored, got loaded=%v rows=%d", got.searchPreviewLoaded, len(got.searchPreviewRows))
+	}
+}
+
+func TestInstamartSearchPreviewLoadedShowsOKStatus(t *testing.T) {
+	m := instamartModel{screen: instamartScreenSearchInput, searchQuery: "milk", searchPreviewQuery: "milk", searchPreviewLoaded: true, searchPreviewElapsed: 32 * time.Millisecond}
+	out := m.View()
+
+	if !strings.Contains(out, "GET /instamart/search") || !strings.Contains(out, "200 OK · 32ms") {
+		t.Fatalf("expected successful API status, got %q", out)
+	}
+	if strings.Contains(out, "matches in") {
+		t.Fatalf("preview summary should not include latency, got %q", out)
 	}
 }
 
@@ -248,8 +278,8 @@ func TestInstamartSearchEnterWithoutPreviewRunsCommittedSearch(t *testing.T) {
 		t.Fatal("expected committed search command")
 	}
 	loading := updated.(instamartModel)
-	if loading.screen != instamartScreenLoading || loading.loading != "scanning index..." {
-		t.Fatalf("expected scanning loader, got screen=%v loading=%q", loading.screen, loading.loading)
+	if loading.screen != instamartScreenLoading || loading.loading != "GET /instamart/search calling..." {
+		t.Fatalf("expected committed search loader, got screen=%v loading=%q", loading.screen, loading.loading)
 	}
 	_ = cmd()
 	if fake.searchInput.Query != "amul milk" {
@@ -270,7 +300,7 @@ func TestInstamartAppViewUsesRootAddressFlow(t *testing.T) {
 	if fake.addressUserID != "" {
 		t.Fatalf("instamart must not load its own addresses, got user %q", fake.addressUserID)
 	}
-	if !strings.Contains(buf.String(), "Choose a deployment address from the main menu") {
+	if !strings.Contains(buf.String(), "Choose address_id from the main menu") {
 		t.Fatalf("expected root address guidance, got %q", buf.String())
 	}
 }
@@ -294,7 +324,7 @@ func TestInstamartAppViewUsesSessionSelectedAddress(t *testing.T) {
 	if fake.addressCalls != 0 {
 		t.Fatalf("expected session address to skip address load, got %d calls", fake.addressCalls)
 	}
-	if !strings.Contains(buf.String(), "deploying to") || !strings.Contains(buf.String(), "Home") {
+	if !strings.Contains(buf.String(), "address_id") || !strings.Contains(buf.String(), "addr-1") {
 		t.Fatalf("expected selected session address in output, got %q", buf.String())
 	}
 }
@@ -319,8 +349,8 @@ func TestInstamartProductRowsRenderVariationsAndSponsored(t *testing.T) {
 			t.Fatalf("expected %q in product output", want)
 		}
 	}
-	if strings.Contains(out, "200") || strings.Contains(out, "409") {
-		t.Fatalf("product output should not render pseudo HTTP status codes: %q", out)
+	if !strings.Contains(out, "GET /instamart/products/recent 200 OK") || strings.Contains(out, "409") {
+		t.Fatalf("product output should render successful API status only: %q", out)
 	}
 }
 
@@ -353,7 +383,7 @@ func TestInstamartQuantityRendersSelectedItemManifest(t *testing.T) {
 		quantity: 2,
 	}
 	out := m.View()
-	for _, want := range []string{"stage item", "item:", "Milk", "pack:", "1 L", "price:", "Rs 60", "status:", "available", "quantity:", "b/esc results"} {
+	for _, want := range []string{"POST /instamart/cart/items draft", "spin_id:", "item:", "Milk", "pack:", "1 L", "price:", "Rs 60", "status:", "available", "quantity:", "b/esc response"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected %q in quantity output", want)
 		}
@@ -361,8 +391,8 @@ func TestInstamartQuantityRendersSelectedItemManifest(t *testing.T) {
 	if !strings.Contains(out, "38;2;252;128;25") || !strings.Contains(out, "38;2;255;247;237") {
 		t.Fatalf("expected YAML key/value colors in quantity output, got %q", out)
 	}
-	if strings.Contains(out, "action: stage item") {
-		t.Fatalf("quantity output should not repeat the stage action, got %q", out)
+	if strings.Contains(out, "action: stage item") || strings.Contains(out, "stage item") {
+		t.Fatalf("quantity output should not render old stage copy, got %q", out)
 	}
 	if strings.Contains(out, "200") || strings.Contains(out, "409") {
 		t.Fatalf("quantity output should not render pseudo HTTP status codes: %q", out)
@@ -583,12 +613,12 @@ func TestInstamartCartReviewRendersCheckoutDetails(t *testing.T) {
 		StoreIDs:                []string{"store-1", "store-2"},
 	}}
 	out := m.View()
-	for _, want := range []string{"review staged cart", "target", "staged", "diff", "payment", "next", "Work", "2x", "Milk 1 L", "Item Total", "Coupon Discount", "To Pay", "Rs 100", "Cash", "p deploy gate", "p/enter deploy", "warn: cart spans 2 stores"} {
+	for _, want := range []string{"GET /instamart/cart 200 OK", "context", "response.items", "response.bill", "available_payment_methods", "next", "POST /instamart/checkout", "Work", "2x", "Milk 1 L", "Item Total", "Coupon Discount", "To Pay", "Rs 100", "Cash", "p/enter checkout", "risk: cart spans 2 stores"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected %q in cart review", want)
 		}
 	}
-	for _, noisy := range []string{"p/enter ship", "j/k scroll"} {
+	for _, noisy := range []string{"p/enter ship", "p/enter deploy", "j/k scroll", "working tree clean", "diff"} {
 		if strings.Contains(out, noisy) {
 			t.Fatalf("did not expect %q in non-overflowing cart review", noisy)
 		}
@@ -597,7 +627,7 @@ func TestInstamartCartReviewRendersCheckoutDetails(t *testing.T) {
 		t.Fatal("expected green plus and red minus diff markers")
 	}
 	if !strings.Contains(out, "48;") {
-		t.Fatal("expected GitHub-style add/remove row backgrounds")
+		t.Fatal("expected add/remove row backgrounds")
 	}
 	if strings.Contains(out, "38;2;255;68;68m-Rs 20") {
 		t.Fatalf("discount value should not be colored red: %q", out)
@@ -613,11 +643,11 @@ func TestInstamartCartReviewRendersCheckoutDetails(t *testing.T) {
 	}
 }
 
-func TestInstamartEmptyCartReviewUsesCleanWorkingTreeCopy(t *testing.T) {
+func TestInstamartEmptyCartReviewUsesEmptyItemsResponse(t *testing.T) {
 	m := instamartModel{screen: instamartScreenCartReview, currentCart: domaininstamart.Cart{AvailablePaymentMethods: []string{"Cash"}}}
 	out := m.View()
-	if !strings.Contains(out, "working tree clean") {
-		t.Fatalf("expected clean cart copy, got %q", out)
+	if !strings.Contains(out, "response.items") || !strings.Contains(out, "[]") || strings.Contains(out, "working tree clean") {
+		t.Fatalf("expected empty items response, got %q", out)
 	}
 }
 
@@ -628,7 +658,7 @@ func TestInstamartStableFrameHeightAndBodyAnchor(t *testing.T) {
 	if got := strings.Count(out, "\r\n"); got != 24 {
 		t.Fatalf("expected 80x24 frame height, got %d lines: %q", got, out)
 	}
-	bodyLine := renderedLineIndex(out, "grep products")
+	bodyLine := renderedLineIndex(out, "GET  /instamart/search")
 	if bodyLine < 0 {
 		t.Fatalf("expected home body anchor, got %q", out)
 	}
@@ -638,8 +668,8 @@ func TestInstamartStableFrameHeightAndBodyAnchor(t *testing.T) {
 	if got := strings.Count(withSlots, "\r\n"); got != 24 {
 		t.Fatalf("expected status/error frame height to stay fixed, got %d lines", got)
 	}
-	if renderedLineIndex(withSlots, "grep products") != bodyLine {
-		t.Fatalf("body anchor moved after status/error slots: before=%d after=%d", bodyLine, renderedLineIndex(withSlots, "grep products"))
+	if renderedLineIndex(withSlots, "GET  /instamart/search") != bodyLine {
+		t.Fatalf("body anchor moved after status/error slots: before=%d after=%d", bodyLine, renderedLineIndex(withSlots, "GET  /instamart/search"))
 	}
 }
 
@@ -732,41 +762,44 @@ func TestInstamartCheckoutRequiresExplicitConfirmation(t *testing.T) {
 	}
 }
 
-func TestInstamartCheckoutConfirmRendersDeployGate(t *testing.T) {
+func TestInstamartCheckoutConfirmRendersRequestGate(t *testing.T) {
 	m := checkoutConfirmModel(&fakeInstamartService{})
 	out := m.View()
-	for _, want := range []string{"Are you sure you want to push --force groceries?", "git push --force groceries", "Home", "payment Cash", "total Rs 80", "y deploy / n cancel"} {
+	for _, want := range []string{"POST /instamart/checkout confirm required", "body address_id=addr-1", "body payment_method=Cash", "total=Rs 80", "risk: this sends a checkout request", "y send request / n cancel"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected %q in checkout confirmation", want)
 		}
 	}
-	for _, noisy := range []string{"REAL SWIGGY ORDER", "places a paid Instamart order", "[ok] address selected", "press y to confirm order", "ship order"} {
+	for _, noisy := range []string{"REAL SWIGGY ORDER", "places a paid Instamart order", "[ok] address selected", "press y to confirm order", "ship order", "push --force", "git push", "deploy"} {
 		if strings.Contains(out, noisy) {
 			t.Fatalf("checkout gate should not render noisy copy %q: %q", noisy, out)
 		}
 	}
 }
 
-func TestInstamartCheckoutConfirmFooterUsesDeployCopy(t *testing.T) {
+func TestInstamartCheckoutConfirmFooterUsesRequestCopy(t *testing.T) {
 	m := checkoutConfirmModel(&fakeInstamartService{})
 	footer := m.footer()
-	for _, want := range []string{"y deploy", "n cancel"} {
+	for _, want := range []string{"y send", "n cancel"} {
 		if !strings.Contains(footer, want) {
 			t.Fatalf("expected %q in footer, got %q", want, footer)
 		}
 	}
-	if strings.Contains(footer, "confirm order") || strings.Contains(footer, "help") {
+	if strings.Contains(footer, "confirm order") || strings.Contains(footer, "help") || strings.Contains(footer, "deploy") {
 		t.Fatalf("checkout footer should stay low-clutter, got %q", footer)
 	}
 }
 
-func TestInstamartOrderResultRendersDeployLogs(t *testing.T) {
+func TestInstamartOrderResultRendersCheckoutResponse(t *testing.T) {
 	m := instamartModel{screen: instamartScreenOrderResult, checkoutElapsed: 92 * time.Second, checkoutResult: domaininstamart.CheckoutResult{Message: "Instamart order placed successfully!", Status: "confirmed", PaymentMethod: "Cash", OrderIDs: []string{"order-1"}, CartTotal: 80}}
 	out := m.View()
-	for _, want := range []string{"deploy logs", "[ok] git push --force origin groceries", "[ok] Instamart order placed successfully!", "[ok] payment method: Cash", "[ok] status: confirmed", "[info] order_id=order-1", "[info] stores=1", "[info] total=Rs 80", "[info] deployed_in=1m 32s"} {
+	for _, want := range []string{"POST /instamart/checkout 201 Created", "response.message:", "Instamart order placed successfully!", "response.payment_method: Cash", "response.status: confirmed", "response.order_id: order-1", "response.stores: 1", "response.total: Rs 80", "response.elapsed: 1m 32s"} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("expected %q in receipt logs", want)
+			t.Fatalf("expected %q in checkout response", want)
 		}
+	}
+	if strings.Contains(out, "git push") || strings.Contains(out, "deploy logs") {
+		t.Fatalf("checkout response should not render old deploy logs, got %q", out)
 	}
 }
 
@@ -777,14 +810,14 @@ func TestInstamartOperationTimingStatus(t *testing.T) {
 		t.Fatalf("expected address timing, got %q", updated.(instamartModel).status)
 	}
 
-	updated, _ = instamartModel{screen: instamartScreenLoading}.Update(instamartCartMsg{cart: cartWithItems(nil), action: "loaded staged cart", elapsed: 1100 * time.Millisecond})
-	if !strings.Contains(updated.(instamartModel).status, "loaded staged cart in 1.1s") {
+	updated, _ = instamartModel{screen: instamartScreenLoading}.Update(instamartCartMsg{cart: cartWithItems(nil), action: "GET /instamart/cart 200 OK", elapsed: 1100 * time.Millisecond})
+	if !strings.Contains(updated.(instamartModel).status, "GET /instamart/cart 200 OK in 1.1s") {
 		t.Fatalf("expected cart timing, got %q", updated.(instamartModel).status)
 	}
 
 	updated, _ = instamartModel{screen: instamartScreenLoading}.Update(instamartCheckoutMsg{result: domaininstamart.CheckoutResult{Message: "ok"}, elapsed: 2*time.Minute + 3*time.Second})
-	if !strings.Contains(updated.(instamartModel).status, "deploy complete") {
-		t.Fatalf("expected deploy timing, got %q", updated.(instamartModel).status)
+	if !strings.Contains(updated.(instamartModel).status, "POST /instamart/checkout 201 Created") {
+		t.Fatalf("expected checkout status, got %q", updated.(instamartModel).status)
 	}
 }
 
@@ -810,7 +843,7 @@ func TestInstamartHelpScreenOpensAndReturns(t *testing.T) {
 		t.Fatal("help should not call service")
 	}
 	help := updated.(instamartModel)
-	if help.screen != instamartScreenHelp || !strings.Contains(help.View(), "swiggy.dev keys") || !strings.Contains(help.View(), "/          grep products") {
+	if help.screen != instamartScreenHelp || !strings.Contains(help.View(), "swiggy.dev keys") || !strings.Contains(help.View(), "/          search products") {
 		t.Fatalf("expected help screen, got %q", help.View())
 	}
 	updated, _ = help.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
@@ -863,7 +896,7 @@ func TestInstamartCheckoutBlocksStaleCartAddress(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("stale cart address should not proceed to checkout confirmation")
 	}
-	if !strings.Contains(updated.(instamartModel).err, "Cart address no longer matches") {
+	if !strings.Contains(updated.(instamartModel).err, "Cart address_id no longer matches") {
 		t.Fatalf("expected stale address error, got %q", updated.(instamartModel).err)
 	}
 }
@@ -965,7 +998,7 @@ func TestInstamartViewCartRequiresSelectedAddress(t *testing.T) {
 	if fake.getCartCalls != 0 {
 		t.Fatal("service GetCart should not be called before address selection")
 	}
-	if !strings.Contains(updated.(instamartModel).err, "Choose a deployment address") {
+	if !strings.Contains(updated.(instamartModel).err, "Choose address_id") {
 		t.Fatalf("expected address error, got %q", updated.(instamartModel).err)
 	}
 }

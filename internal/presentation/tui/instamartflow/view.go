@@ -23,7 +23,7 @@ func (m instamartModel) View() string {
 	case instamartScreenStatic:
 		m.renderStatic(&body)
 	case instamartScreenLoadingAddresses:
-		body.WriteString(line(" Loading saved deployment addresses..."))
+		body.WriteString(line(" GET /instamart/addresses..."))
 	case instamartScreenAddressSelect:
 		m.renderAddresses(&body)
 	case instamartScreenHome:
@@ -105,10 +105,10 @@ func fixedBody(content string, rows int) string {
 
 func (m instamartModel) headerRight() string {
 	if m.screen == instamartScreenStatic {
-		return creamStyle.Render("deploying to ") + brandStyle.Render(defaultString(m.staticAddressLabel, "Home"))
+		return creamStyle.Render("address ") + brandStyle.Render(defaultString(m.staticAddressLabel, "Home"))
 	}
 	if m.selectedAddress != nil {
-		return creamStyle.Render("deploying to ") + brandStyle.Render(addressLabel(*m.selectedAddress))
+		return creamStyle.Render("address_id ") + brandStyle.Render(m.selectedAddress.ID)
 	}
 	return mutedStyle.Render("choose address")
 }
@@ -145,21 +145,21 @@ func (m instamartModel) screenMode() string {
 	case instamartScreenLoadingAddresses, instamartScreenAddressSelect:
 		return "address"
 	case instamartScreenSearchInput, instamartScreenProductList:
-		return "grep"
+		return "search"
 	case instamartScreenQuantity:
-		return "stage"
+		return "request"
 	case instamartScreenLoading:
 		return "loading"
 	case instamartScreenCartReview:
 		return "cart"
 	case instamartScreenCheckoutConfirm:
-		return "deploy"
+		return "checkout"
 	case instamartScreenOrderResult:
-		return "logs"
+		return "response"
 	case instamartScreenOrders:
-		return "history"
+		return "orders"
 	case instamartScreenTracking:
-		return "tail"
+		return "track"
 	case instamartScreenHelp:
 		return "help"
 	default:
@@ -172,23 +172,23 @@ func (m instamartModel) footer() string {
 	case instamartScreenAddressSelect:
 		return footerLine(KeyHint{Key: "j/k", Label: "move"}, KeyHint{Key: "1-9", Label: "select"}, KeyHint{Key: "?", Label: "help"}, KeyHint{Key: "q", Label: "quit"})
 	case instamartScreenHome, instamartScreenStatic:
-		return footerLine(KeyHint{Key: "j/k", Label: "move"}, KeyHint{Key: "1-3", Label: "select"}, KeyHint{Key: "/", Label: "grep"}, KeyHint{Key: "c", Label: "cart"}, KeyHint{Key: "esc", Label: "main"}, KeyHint{Key: "q", Label: "quit"})
+		return footerLine(KeyHint{Key: "j/k", Label: "move"}, KeyHint{Key: "1-5", Label: "select"}, KeyHint{Key: "/", Label: "search"}, KeyHint{Key: "c", Label: "cart"}, KeyHint{Key: "esc", Label: "main"}, KeyHint{Key: "q", Label: "quit"})
 	case instamartScreenSearchInput:
 		return footerLine(KeyHint{Key: "enter", Label: "open results"}, KeyHint{Key: "esc", Label: "home"}, KeyHint{Key: "?", Label: "help"}, KeyHint{Key: "q", Label: "quit"})
 	case instamartScreenProductList:
 		return footerLine(KeyHint{Key: "j/k", Label: "move"}, KeyHint{Key: "1-9", Label: "choose"}, KeyHint{Key: "enter", Label: "choose"}, KeyHint{Key: "?", Label: "help"}, KeyHint{Key: "esc", Label: "home"})
 	case instamartScreenQuantity:
-		return footerLine(KeyHint{Key: "+/-", Label: "quantity"}, KeyHint{Key: "enter", Label: "stage"}, KeyHint{Key: "b/esc", Label: "results"}, KeyHint{Key: "?", Label: "help"})
+		return footerLine(KeyHint{Key: "+/-", Label: "quantity"}, KeyHint{Key: "enter", Label: "send"}, KeyHint{Key: "b/esc", Label: "response"}, KeyHint{Key: "?", Label: "help"})
 	case instamartScreenCartReview:
-		hints := []KeyHint{{Key: "p/enter", Label: "deploy"}, {Key: "/", Label: "grep"}, {Key: "b", Label: "home"}}
+		hints := []KeyHint{{Key: "p/enter", Label: "checkout"}, {Key: "/", Label: "search"}, {Key: "b", Label: "home"}}
 		if m.cartReviewOverflows() {
 			hints = append([]KeyHint{{Key: "j/k", Label: "scroll"}}, hints...)
 		}
 		return footerLine(hints...)
 	case instamartScreenCheckoutConfirm:
-		return footerLine(KeyHint{Key: "y", Label: "deploy"}, KeyHint{Key: "n", Label: "cancel"})
+		return footerLine(KeyHint{Key: "y", Label: "send"}, KeyHint{Key: "n", Label: "cancel"})
 	case instamartScreenOrders:
-		return footerLine(KeyHint{Key: "j/k", Label: "move"}, KeyHint{Key: "enter", Label: "tail"}, KeyHint{Key: "?", Label: "help"}, KeyHint{Key: "b", Label: "home"})
+		return footerLine(KeyHint{Key: "j/k", Label: "move"}, KeyHint{Key: "enter", Label: "track"}, KeyHint{Key: "?", Label: "help"}, KeyHint{Key: "b", Label: "home"})
 	case instamartScreenHelp:
 		return footerLine(KeyHint{Key: "?", Label: "back"}, KeyHint{Key: "b", Label: "back"}, KeyHint{Key: "q", Label: "quit"})
 	default:

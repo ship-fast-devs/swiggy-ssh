@@ -2,7 +2,7 @@
 
 ## What this is
 
-`ssh swiggy.dev` — an SSH server for ordering Swiggy Instamart groceries from the terminal. Users connect with an SSH key, link their Swiggy account via a browser login-code flow, and interact through a Bubbletea TUI.
+`ssh swiggy.dev` — an SSH server for ordering Swiggy Instamart groceries from the terminal. Users connect with an SSH key, link their Swiggy account via a browser OAuth 2.1 + PKCE flow, and interact through a Bubbletea TUI.
 
 **Current state**: Auth & identity foundation complete. Instamart integration is next.
 
@@ -42,11 +42,11 @@ Ports & Adapters (Clean Architecture). Five layer groups:
 | Auth orchestration (`EnsureValidAccountUseCase.Execute`) | `internal/application/auth/ensure_valid_account.go` |
 | Identity/session use cases (`ResolveSSHIdentityUseCase`, `StartTerminalSessionUseCase`, `EndTerminalSessionUseCase`) | `internal/application/identity/` |
 | SSH connection + session routing | `internal/presentation/ssh/server.go` |
-| Browser login page handlers | `internal/presentation/http/` |
+| Browser auth start/callback handlers | `internal/presentation/http/` |
 | TUI screens (Bubbletea v1 + Lipgloss) | `internal/presentation/tui/tui.go` |
 | Postgres repositories | `internal/infrastructure/persistence/postgres/postgres.go` |
 | DB schema + migrations | `internal/infrastructure/persistence/postgres/migrations/` |
-| Redis login-code service | `internal/infrastructure/cache/redis/redis_logincode.go` |
+| Redis browser auth attempt service | `internal/infrastructure/cache/redis/redis_logincode.go` |
 | Token encryption (AES-256-GCM) | `internal/infrastructure/crypto/aes.go` |
 | Config + env vars | `internal/platform/config/config.go` |
 | Wiring entrypoint | `cmd/swiggy-ssh/main.go` |
@@ -57,11 +57,13 @@ Ports & Adapters (Clean Architecture). Five layer groups:
 
 ## Key constraints
 
-- Raw login codes are **never stored** — only SHA-256 hex in Redis
+- `ssh_identities.id` is the durable local principal — there is no `users` table unless a real user identity is introduced later
+- Browser auth attempts use high-entropy tokens; raw attempt tokens are **never stored as Redis keys** — Redis keys use SHA-256 hex
+- PKCE `code_verifier` is stored only in the TTL-limited Redis auth attempt value and is never rendered or logged
 - `OAuthAccount.AccessToken` is **never logged or rendered** — store decrypts on read, callers get plaintext
 - `TOKEN_ENCRYPTION_KEY` default is dev-only — production guard in `main.go` refuses startup with it
 - `NoOpEncryptor` is for tests only — never wire in production
-- Mock tokens are `mock-token-<userID>` — no real Swiggy credentials ever committed
+- Mock tokens are local-only placeholders — no real Swiggy credentials ever committed
 - Every service with time logic has an injectable `now func() time.Time` — never call `time.Now()` inside a service method directly
 
 ---
@@ -92,10 +94,12 @@ Ports & Adapters (Clean Architecture). Five layer groups:
 
 ```bash
 make up       # full stack via Docker Compose (builds image, runs migrations, starts everything)
+make up-swiggy # full stack with real Swiggy OAuth using SWIGGY_PROVIDER=swiggy
 make down     # stop everything
 make reset    # wipe all volumes and containers (fresh start)
 
 make dev      # run app on host (requires make up first for Postgres + Redis)
+make dev-swiggy # run app on host with real Swiggy OAuth
 make migrate  # apply pending migrations against running Postgres
 make test     # unit tests
 ```
@@ -117,5 +121,5 @@ make test     # unit tests
 - **Instamart integration** (SWGY-15+): product search, cart, checkout via real Swiggy API
 - **Keyboard input wiring**: `HomeView`, `LoginSuccessView`, `InstamartView` have `In io.Reader` fields ready — pass `ssh.Channel` as `In` to enable cursor movement in real sessions
 - **`UpdateCurrentScreen`**: `TerminalSession.CurrentScreen` is set once at session start and never updated — needs a tracker method when screen navigation is wired
-- **Real Swiggy provider**: `internal/infrastructure/provider/swiggy/client.go` is a stub
+- **Real Instamart provider**: `internal/infrastructure/provider/swiggy/client.go` has auth support; product/cart/checkout APIs are next
 - **Audit logging**: `audit_events` table is in the schema, no writes yet

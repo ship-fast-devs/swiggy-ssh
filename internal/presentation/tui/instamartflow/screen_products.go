@@ -11,14 +11,21 @@ import (
 const productListRows = 9
 
 func (m instamartModel) renderSearch(sb *strings.Builder) {
-	sb.WriteString(line(brandStyle.Render(" grep products")))
+	sb.WriteString(line(brandStyle.Render(" GET /instamart/search")))
 	sb.WriteString(line(""))
+	sb.WriteString(line(" params" + m.searchAPIStatus()))
 	sb.WriteString(line(" query: " + boldStyle.Render(m.searchQuery) + cursorStyle.Render("_")))
+	sb.WriteString(line(" address_id: " + m.selectedAddressID()))
 
+	if m.searchPreviewDebouncing {
+		sb.WriteString(line(""))
+		sb.WriteString(line(" debounce active..."))
+		return
+	}
 	if m.searchPreviewLoading {
 		frame := searchSpinnerFrames[m.searchPreviewSpinner%len(searchSpinnerFrames)]
 		sb.WriteString(line(""))
-		sb.WriteString(line(" " + frame + " scanning index..."))
+		sb.WriteString(line(" " + frame + " calling search endpoint..."))
 		return
 	}
 	if m.searchPreviewErr != "" {
@@ -31,7 +38,7 @@ func (m instamartModel) renderSearch(sb *strings.Builder) {
 	}
 
 	sb.WriteString(line(""))
-	sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" preview · enter opens results · %d matches in %s", len(m.searchPreviewRows), formatElapsed(m.searchPreviewElapsed)))))
+	sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" response preview · enter opens response.products · %d matches", len(m.searchPreviewRows)))))
 	if len(m.searchPreviewRows) == 0 {
 		sb.WriteString(line(" No matching products found yet."))
 		return
@@ -40,6 +47,19 @@ func (m instamartModel) renderSearch(sb *strings.Builder) {
 	if len(m.searchPreviewRows) > 5 {
 		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" ...and %d more", len(m.searchPreviewRows)-5))))
 	}
+}
+
+func (m instamartModel) searchAPIStatus() string {
+	if m.searchPreviewLoading {
+		return mutedStyle.Render("  calling...")
+	}
+	if m.searchPreviewErr != "" {
+		return errorStyle.Render("  error")
+	}
+	if m.searchPreviewLoaded && m.searchPreviewQuery == m.searchQuery {
+		return mutedStyle.Render("  200 OK · " + formatElapsed(m.searchPreviewElapsed))
+	}
+	return ""
 }
 
 func renderPreviewProductTable(sb *strings.Builder, rows []productVariationRow, limit int) {
@@ -70,9 +90,9 @@ func productPreviewRow(row productVariationRow) string {
 }
 
 func (m instamartModel) renderProducts(sb *strings.Builder) {
-	title := "grep results"
+	title := "GET /instamart/search?query=" + m.searchQuery + " 200 OK"
 	if strings.TrimSpace(m.searchQuery) == "" {
-		title = "recent cache"
+		title = "GET /instamart/products/recent 200 OK"
 	}
 	sb.WriteString(line(brandStyle.Render(" " + title)))
 	if len(m.rows) > productListRows {
@@ -81,9 +101,9 @@ func (m instamartModel) renderProducts(sb *strings.Builder) {
 		if end > len(m.rows) {
 			end = len(m.rows)
 		}
-		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" choose exact pack · showing %d-%d of %d", start+1, end, len(m.rows)))))
+		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" response.products · choose exact pack · showing %d-%d of %d", start+1, end, len(m.rows)))))
 	} else {
-		sb.WriteString(line(mutedStyle.Render(" choose exact pack")))
+		sb.WriteString(line(mutedStyle.Render(" response.products · choose exact pack")))
 	}
 	renderProductTable(sb, m.rows, m.cursor, productListRows)
 }
@@ -153,21 +173,22 @@ func (m instamartModel) renderQuantity(sb *strings.Builder) {
 		sb.WriteString(line(" No variation selected."))
 		return
 	}
-	sb.WriteString(line(brandStyle.Render(" stage item")))
+	sb.WriteString(line(brandStyle.Render(" POST /instamart/cart/items draft")))
 	status := "available"
 	statusStyle := successStyle
 	if !productRowAvailable(*m.selectedRow) {
 		status = "unavailable"
 		statusStyle = errorStyle
 	}
+	sb.WriteString(yamlLine("spin_id", m.selectedRow.Variation.SpinID, yamlValStyle))
 	sb.WriteString(yamlLine("item", defaultString(m.selectedRow.Variation.DisplayName, m.selectedRow.Product.DisplayName), yamlValStyle))
 	sb.WriteString(yamlLine("pack", defaultString(m.selectedRow.Variation.QuantityDescription, "-"), yamlValStyle))
 	sb.WriteString(yamlLine("price", fmt.Sprintf("Rs %d", m.selectedRow.Variation.Price.OfferPrice), yamlValStyle))
 	sb.WriteString(yamlLine("status", status, statusStyle))
 	sb.WriteString(yamlLine("quantity", strconv.Itoa(m.quantity), successStyle))
 	sb.WriteString(line(""))
-	sb.WriteString(line(" Press enter to update the whole intended cart."))
-	sb.WriteString(line(" Set quantity to 0 to remove this variation."))
+	sb.WriteString(line(" effect: enter sends the full intended cart."))
+	sb.WriteString(line(" effect: quantity 0 removes this variation."))
 }
 
 func yamlLine(key, value string, valueStyle lipgloss.Style) string {

@@ -45,19 +45,19 @@ func (m foodModel) cartReviewLines() []string {
 		restLabel = m.selectedRestaurant.Name
 	}
 	lines := []string{
-		brandStyle.Render(" review staged cart"),
-		mutedStyle.Render("restaurant") + " " + boldStyle.Render(restLabel),
-		mutedStyle.Render("address") + " " + boldStyle.Render(selectedFoodAddressLabel(m.selectedAddress)),
+		brandStyle.Render(" GET /food/cart 200 OK"),
+		mutedStyle.Render("context.restaurant") + " " + boldStyle.Render(restLabel),
+		mutedStyle.Render("context.address_id") + " " + boldStyle.Render(m.selectedAddressID()),
 	}
-	lines = append(lines, mutedStyle.Render("items"))
+	lines = append(lines, mutedStyle.Render("response.items"))
 	if len(cart.Items) == 0 {
-		lines = append(lines, " working tree clean")
+		lines = append(lines, " []")
 	} else {
 		for _, item := range cart.Items {
 			lines = append(lines, foodDiffText("+", fmt.Sprintf("%-3s %-38s Rs %d", fmt.Sprintf("%dx", item.Quantity), item.Name, item.FinalPrice)))
 		}
 	}
-	lines = append(lines, mutedStyle.Render("bill"))
+	lines = append(lines, mutedStyle.Render("response.bill"))
 	for _, bl := range cart.Bill.Lines {
 		lines = append(lines, foodDiffText(foodBillLineSign(bl), fmt.Sprintf("%-43s %s", bl.Label, foodDisplayBillValue(bl.Value))))
 	}
@@ -68,8 +68,8 @@ func (m foodModel) cartReviewLines() []string {
 	}
 	lines = append(lines, foodDiffText("+", boldStyle.Render(fmt.Sprintf("%-43s %s", toPayLabel, toPayValue))))
 	lines = append(lines,
-		mutedStyle.Render("payment")+" "+defaultString(strings.Join(cart.AvailablePaymentMethods, ", "), "none"),
-		mutedStyle.Render("next")+" p deploy gate",
+		mutedStyle.Render("available_payment_methods")+" "+defaultString(strings.Join(cart.AvailablePaymentMethods, ", "), "none"),
+		mutedStyle.Render("next")+" c GET /food/coupons · p POST /food/checkout",
 	)
 	return lines
 }
@@ -115,30 +115,30 @@ func (m foodModel) renderCheckoutConfirm(sb *strings.Builder) {
 	} else if m.currentCart.RestaurantName != "" {
 		restName = m.currentCart.RestaurantName
 	}
-	sb.WriteString(centeredLine("Are you sure you want to place this food order?"))
-	sb.WriteString(centeredLine(brandStyle.Render(restName)))
+	sb.WriteString(centeredLine(brandStyle.Render("POST /food/checkout confirm required")))
+	sb.WriteString(centeredLine("request.restaurant " + restName))
 	sb.WriteString(line(""))
-	sb.WriteString(centeredLine(selectedFoodAddressLabel(m.selectedAddress)))
-	sb.WriteString(centeredLine("payment " + m.paymentMethod + " · total " + fmt.Sprintf("Rs %d", foodCartToPayRupees(m.currentCart))))
+	sb.WriteString(centeredLine("request.address_id " + m.selectedAddressID()))
+	sb.WriteString(centeredLine("request.payment_method " + m.paymentMethod + " · total " + fmt.Sprintf("Rs %d", foodCartToPayRupees(m.currentCart))))
 	sb.WriteString(line(""))
-	sb.WriteString(centeredLine(mutedStyle.Render("order gate · explicit y required")))
+	sb.WriteString(centeredLine(mutedStyle.Render("risk: irreversible checkout request · explicit y required")))
 	sb.WriteString(line(""))
-	sb.WriteString(centeredLine("y place order / n cancel"))
+	sb.WriteString(centeredLine("y send request / n cancel"))
 }
 
 func (m foodModel) renderOrderResult(sb *strings.Builder) {
-	sb.WriteString(line(brandStyle.Render(" order placed")))
-	sb.WriteString(line(" [ok] food order placed successfully"))
+	sb.WriteString(line(brandStyle.Render(" POST /food/checkout 201 Created")))
+	sb.WriteString(line(" [ok] response.created=true"))
 	msg := m.orderResult.Message
 	if msg == "" {
 		msg = "Order placed."
 	}
 	sb.WriteString(line(" " + successStyle.Render("[ok] "+msg)))
 	if m.orderResult.Status != "" {
-		sb.WriteString(line(" [ok] status: " + m.orderResult.Status))
+		sb.WriteString(line(" [ok] response.status=" + m.orderResult.Status))
 	}
 	if m.orderResult.PaymentMethod != "" {
-		sb.WriteString(line(" [ok] payment: " + m.orderResult.PaymentMethod))
+		sb.WriteString(line(" [ok] response.payment_method=" + m.orderResult.PaymentMethod))
 	}
 	if m.orderResult.OrderID != "" {
 		sb.WriteString(line(" [info] order_id=" + m.orderResult.OrderID))
@@ -147,23 +147,24 @@ func (m foodModel) renderOrderResult(sb *strings.Builder) {
 		sb.WriteString(line(fmt.Sprintf(" [info] total=Rs %d", m.orderResult.CartTotal)))
 	}
 	if m.orderElapsed > 0 {
-		sb.WriteString(line(" [info] placed_in=" + formatElapsed(m.orderElapsed)))
+		sb.WriteString(line(" [info] response.elapsed=" + formatElapsed(m.orderElapsed)))
 	}
 	sb.WriteString(line(""))
 	sb.WriteString(line(mutedStyle.Render(" To cancel: call Swiggy customer care at 080-67466729")))
 }
 
 func (m foodModel) renderCoupons(sb *strings.Builder) {
-	sb.WriteString(line(brandStyle.Render(" available coupons")))
+	sb.WriteString(line(brandStyle.Render(" GET /food/coupons 200 OK")))
 	if m.coupons.Applicable > 0 {
-		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" %d applicable coupon(s)", m.coupons.Applicable))))
+		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" response.coupons · %d applicable coupon(s)", m.coupons.Applicable))))
 	} else {
-		sb.WriteString(line(""))
+		sb.WriteString(line(mutedStyle.Render(" response.coupons")))
 	}
 	if len(m.coupons.Coupons) == 0 {
 		sb.WriteString(line(" No coupons available."))
 		return
 	}
+	sb.WriteString(line(mutedStyle.Render(" enter sends POST /food/cart/coupon")))
 	for i, coupon := range m.coupons.Coupons {
 		applicableStr := ""
 		if !coupon.Applicable {

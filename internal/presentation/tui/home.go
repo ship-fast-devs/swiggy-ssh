@@ -285,9 +285,10 @@ func (m homeModel) View() string {
 	var body strings.Builder
 	if m.addresses {
 		body.WriteString(line(""))
-		body.WriteString(line(brandStyle.Render(" Choose deployment address")))
+		body.WriteString(line(brandStyle.Render(" GET /addresses 200 OK")))
+		body.WriteString(line(mutedStyle.Render(" response: saved delivery targets")))
 		if len(m.session.Addresses) == 0 {
-			body.WriteString(line(" " + mutedStyle.Render("No saved addresses found. Add one in Swiggy first.")))
+			body.WriteString(line(" " + mutedStyle.Render("[] No saved addresses found. Add one in Swiggy first.")))
 		} else {
 			for i, address := range m.session.Addresses {
 				label := fmt.Sprintf("%d. %s", i+1, homeAddressLabel(address))
@@ -302,6 +303,11 @@ func (m homeModel) View() string {
 				} else {
 					body.WriteString(line("   " + label))
 				}
+			}
+			idx := selectedHomeAddressIndex(m.session)
+			if idx >= 0 && idx < len(m.session.Addresses) {
+				body.WriteString(line(""))
+				body.WriteString(line(" selected_address: " + brandStyle.Render(homeAddressLabel(m.session.Addresses[idx]))))
 			}
 		}
 		sb.WriteString(fixedBody(body.String(), fixedFrameBodyRows))
@@ -337,7 +343,8 @@ func (m homeModel) View() string {
 		return centerInViewport(sb.String(), m.viewport)
 	}
 
-	body.WriteString(line(brandStyle.Render(" What would you like to do?")))
+	body.WriteString(line(brandStyle.Render(" swiggy.dev API console")))
+	body.WriteString(line(mutedStyle.Render(" available resources")))
 	body.WriteString(line(""))
 	for i, item := range m.items {
 		label := homeItemLabel(item)
@@ -379,9 +386,9 @@ func (m homeModel) headerRight() string {
 	case HomeAddressSelected:
 		idx := selectedHomeAddressIndex(m.session)
 		if idx >= 0 && idx < len(m.session.Addresses) {
-			return creamStyle.Render("deploying to ") + brandStyle.Render(homeAddressLabel(m.session.Addresses[idx]))
+			return creamStyle.Render("delivering to ") + brandStyle.Render(homeAddressLabel(m.session.Addresses[idx]))
 		}
-		return creamStyle.Render("deploying to ") + brandStyle.Render("selected address")
+		return creamStyle.Render("delivering to ") + brandStyle.Render("selected address")
 	case HomeAddressRequired:
 		return errorStyle.Render("address required ")
 	case HomeAddressUnavailable:
@@ -439,11 +446,11 @@ func homeItemLabel(item homeItem) string {
 func homeItemsForSession(state HomeSessionState) []homeItem {
 	addressAvailable := state.Authenticated && len(state.Addresses) > 0
 	return []homeItem{
-		{icon: "▦", label: "Instamart", action: homeItemInstamart, available: true},
-		{icon: "◖", label: "Food", action: homeItemFood, available: true},
-		{icon: "⌂", label: "Addresses", action: homeItemAddresses, available: addressAvailable},
-		{icon: "◷", label: "Tail active order", action: homeItemTrack, available: true},
-		{icon: "✦", label: "swiggy.ai", action: homeItemAI, available: false},
+		{icon: "GET", label: "/instamart", action: homeItemInstamart, available: true},
+		{icon: "GET", label: "/food", action: homeItemFood, available: true},
+		{icon: "GET", label: "/addresses", action: homeItemAddresses, available: addressAvailable},
+		{icon: "GET", label: "/orders/active", action: homeItemTrack, available: true},
+		{icon: "POST", label: "/ai/assistant", action: homeItemAI, available: false},
 	}
 }
 

@@ -115,9 +115,11 @@ type instamartHomeChoice struct {
 }
 
 var instamartHomeChoices = []instamartHomeChoice{
-	{icon: "⌕", label: "grep products", action: "search"},
-	{icon: "↺", label: "recent cache", action: "goto"},
-	{icon: "▦", label: "staged cart", action: "cart"},
+	{icon: "GET", label: "/instamart/search", action: "search"},
+	{icon: "GET", label: "/instamart/products/recent", action: "goto"},
+	{icon: "GET", label: "/instamart/cart", action: "cart"},
+	{icon: "GET", label: "/instamart/orders", action: "orders"},
+	{icon: "GET", label: "/instamart/orders/active/track", action: "track"},
 }
 
 type productVariationRow struct {
@@ -148,15 +150,16 @@ type instamartModel struct {
 
 	searchQuery string
 
-	searchPreviewQuery    string
-	searchPreviewProducts []domaininstamart.Product
-	searchPreviewRows     []productVariationRow
-	searchPreviewLoading  bool
-	searchPreviewLoaded   bool
-	searchPreviewVersion  int
-	searchPreviewSpinner  int
-	searchPreviewErr      string
-	searchPreviewElapsed  time.Duration
+	searchPreviewQuery      string
+	searchPreviewProducts   []domaininstamart.Product
+	searchPreviewRows       []productVariationRow
+	searchPreviewDebouncing bool
+	searchPreviewLoading    bool
+	searchPreviewLoaded     bool
+	searchPreviewVersion    int
+	searchPreviewSpinner    int
+	searchPreviewErr        string
+	searchPreviewElapsed    time.Duration
 
 	products    []domaininstamart.Product
 	rows        []productVariationRow
@@ -293,7 +296,7 @@ func (m instamartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rows = flattenProductRows(msg.result.Products)
 		m.cursor = 0
 		m.screen = instamartScreenProductList
-		m.status = fmt.Sprintf("matched %d products in %s", len(m.rows), formatElapsed(msg.elapsed))
+		m.status = fmt.Sprintf("GET /instamart/search 200 OK · %d products in %s", len(m.rows), formatElapsed(msg.elapsed))
 		if len(m.rows) == 0 {
 			m.screen = instamartScreenHome
 			m.status = "No matching products found. Try another search."
@@ -303,6 +306,7 @@ func (m instamartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen != instamartScreenSearchInput || msg.version != m.searchPreviewVersion || msg.query != m.searchQuery || len([]rune(strings.TrimSpace(msg.query))) < 2 {
 			return clearOnScreenChange(previousScreen, m, nil)
 		}
+		m.searchPreviewDebouncing = false
 		m.searchPreviewLoading = true
 		m.searchPreviewLoaded = false
 		m.searchPreviewQuery = msg.query
@@ -329,7 +333,7 @@ func (m instamartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cartScroll = 0
 		m.status = msg.action + " in " + formatElapsed(msg.elapsed)
 		if msg.refreshErr != nil {
-			m.err = displayErr("Cart staged, but payment refresh failed", msg.refreshErr)
+			m.err = displayErr("Cart updated, but payment refresh failed", msg.refreshErr)
 		} else {
 			m.err = ""
 		}
@@ -343,7 +347,7 @@ func (m instamartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.checkoutResult = msg.result
 		m.checkoutElapsed = msg.elapsed
 		m.screen = instamartScreenOrderResult
-		m.status = "deploy complete"
+		m.status = "POST /instamart/checkout 201 Created"
 		return clearOnScreenChange(previousScreen, m, nil)
 	case instamartOrdersMsg:
 		if msg.err != nil {
@@ -357,7 +361,7 @@ func (m instamartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.activeOnly {
 			m.status = "loaded active orders in " + formatElapsed(msg.elapsed)
 		} else {
-			m.status = "loaded deploy history in " + formatElapsed(msg.elapsed)
+			m.status = "GET /instamart/orders 200 OK · " + formatElapsed(msg.elapsed)
 		}
 		return clearOnScreenChange(previousScreen, m, nil)
 	case instamartTrackingMsg:
@@ -372,7 +376,7 @@ func (m instamartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.tracking = msg.status
 		m.screen = instamartScreenTracking
-		m.status = "tailed in " + formatElapsed(msg.elapsed)
+		m.status = "GET /instamart/orders/{order_id}/track 200 OK · " + formatElapsed(msg.elapsed)
 		return clearOnScreenChange(previousScreen, m, nil)
 	}
 	return m, nil
@@ -558,25 +562,25 @@ func (m instamartModel) runHomeAction(action string) (tea.Model, tea.Cmd) {
 		return m.startSearch(), nil
 	case "goto":
 		if !m.hasAddress() {
-			m.err = "Choose a deployment address first."
+			m.err = "Choose address_id first."
 			return m, nil
 		}
 		m.screen = instamartScreenLoading
-		m.loading = "Loading recent cache..."
+		m.loading = "GET /instamart/products/recent..."
 		return m, m.loadGoToItemsCmd()
 	case "cart":
 		if !m.hasAddress() {
-			m.err = "Choose a deployment address first."
+			m.err = "Choose address_id first."
 			return m, nil
 		}
-		return m.loadCart("Loading staged cart...")
+		return m.loadCart("GET /instamart/cart...")
 	case "track":
 		m.screen = instamartScreenLoading
-		m.loading = "Looking for active orders..."
+		m.loading = "GET /instamart/orders?active=true..."
 		return m, m.loadOrdersCmd(true)
 	case "orders":
 		m.screen = instamartScreenLoading
-		m.loading = "Loading deploy history..."
+		m.loading = "GET /instamart/orders..."
 		return m, m.loadOrdersCmd(false)
 	}
 	return m, nil
@@ -592,7 +596,7 @@ func (m instamartModel) handleHelpKey(key string) (tea.Model, tea.Cmd) {
 
 func (m instamartModel) startSearch() instamartModel {
 	if !m.hasAddress() {
-		m.err = "Choose a deployment address first."
+		m.err = "Choose address_id first."
 		return m
 	}
 	m.screen = instamartScreenSearchInput
@@ -600,6 +604,7 @@ func (m instamartModel) startSearch() instamartModel {
 	m.searchPreviewQuery = ""
 	m.searchPreviewProducts = nil
 	m.searchPreviewRows = nil
+	m.searchPreviewDebouncing = false
 	m.searchPreviewLoading = false
 	m.searchPreviewLoaded = false
 	m.searchPreviewElapsed = 0
@@ -625,7 +630,7 @@ func (m instamartModel) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.openProductList(m.searchPreviewProducts), nil
 		}
 		m.screen = instamartScreenLoading
-		m.loading = "scanning index..."
+		m.loading = "GET /instamart/search calling..."
 		return m, m.searchProductsCmd(query, false, m.searchPreviewVersion)
 	case "backspace", "ctrl+h":
 		if len(m.searchQuery) > 0 {
@@ -651,6 +656,7 @@ func clearSearchRenderCmd(cmd tea.Cmd) tea.Cmd {
 
 func (m *instamartModel) queueSearchPreview() tea.Cmd {
 	m.searchPreviewVersion++
+	m.searchPreviewDebouncing = false
 	m.searchPreviewLoading = false
 	m.searchPreviewLoaded = false
 	m.searchPreviewQuery = ""
@@ -660,6 +666,7 @@ func (m *instamartModel) queueSearchPreview() tea.Cmd {
 	if len([]rune(strings.TrimSpace(m.searchQuery))) < 2 {
 		return nil
 	}
+	m.searchPreviewDebouncing = true
 	query := m.searchQuery
 	version := m.searchPreviewVersion
 	return tea.Tick(searchPreviewDebounce, func(time.Time) tea.Msg {
@@ -673,7 +680,7 @@ func (m instamartModel) openProductList(products []domaininstamart.Product) inst
 	m.cursor = 0
 	m.screen = instamartScreenProductList
 	if m.searchPreviewElapsed > 0 {
-		m.status = fmt.Sprintf("matched %d products in %s", len(m.rows), formatElapsed(m.searchPreviewElapsed))
+		m.status = fmt.Sprintf("GET /instamart/search 200 OK · %d products in %s", len(m.rows), formatElapsed(m.searchPreviewElapsed))
 	}
 	if len(m.rows) == 0 {
 		m.screen = instamartScreenHome
@@ -744,7 +751,7 @@ func (m instamartModel) handleQuantityKey(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.screen = instamartScreenLoading
-		m.loading = "Updating cart..."
+		m.loading = "POST /instamart/cart/items..."
 		items := upsertCartItem(m.intendedItems, m.selectedRow.Variation.SpinID, m.quantity)
 		return m, m.updateCartCmd(items)
 	default:
@@ -763,7 +770,7 @@ func (m instamartModel) handleCartReviewKey(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if strings.TrimSpace(m.currentCart.AddressID) != "" && strings.TrimSpace(m.currentCart.AddressID) != strings.TrimSpace(m.selectedAddressID()) {
-			m.err = "Cart address no longer matches the selected address. Switch target address or update the cart again."
+			m.err = "Cart address_id no longer matches selected address_id. Choose the matching address_id or update the cart again."
 			return m, nil
 		}
 		paymentMethod := preferredPaymentMethod(m.currentCart.AvailablePaymentMethods)
@@ -803,7 +810,7 @@ func (m instamartModel) handleCheckoutConfirmKey(key string) (tea.Model, tea.Cmd
 	switch key {
 	case "y":
 		m.screen = instamartScreenLoading
-		m.loading = "git push --force groceries..."
+		m.loading = "POST /instamart/checkout..."
 		return m, m.checkoutCmd()
 	case "n", "b", "esc":
 		m.screen = instamartScreenCartReview
@@ -836,7 +843,7 @@ func (m instamartModel) handleOrdersKey(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.screen = instamartScreenLoading
-		m.loading = "Tracking selected order..."
+		m.loading = "GET /instamart/orders/{order_id}/track..."
 		return m, m.trackOrderCmd(order)
 	case "b", "h":
 		m.screen = instamartScreenHome
@@ -916,7 +923,7 @@ func (m instamartModel) loadCartCmd() tea.Cmd {
 	return func() tea.Msg {
 		started := time.Now()
 		cart, err := m.service.GetCart(m.ctx)
-		return instamartCartMsg{cart: cart, err: err, action: "loaded staged cart", elapsed: time.Since(started)}
+		return instamartCartMsg{cart: cart, err: err, action: "GET /instamart/cart 200 OK", elapsed: time.Since(started)}
 	}
 }
 
@@ -925,13 +932,13 @@ func (m instamartModel) updateCartCmd(items []domaininstamart.CartUpdateItem) te
 		started := time.Now()
 		updatedCart, err := m.service.UpdateCart(m.ctx, appinstamart.UpdateCartInput{SelectedAddressID: m.selectedAddressID(), Items: items})
 		if err != nil {
-			return instamartCartMsg{err: err, action: "staged", elapsed: time.Since(started)}
+			return instamartCartMsg{err: err, action: "POST /instamart/cart/items failed", elapsed: time.Since(started)}
 		}
 		cart, err := m.service.GetCart(m.ctx)
 		if err != nil {
-			return instamartCartMsg{cart: updatedCart, refreshErr: err, action: "staged", elapsed: time.Since(started)}
+			return instamartCartMsg{cart: updatedCart, refreshErr: err, action: "POST /instamart/cart/items 200 OK", elapsed: time.Since(started)}
 		}
-		return instamartCartMsg{cart: cart, action: "staged", elapsed: time.Since(started)}
+		return instamartCartMsg{cart: cart, action: "POST /instamart/cart/items 200 OK", elapsed: time.Since(started)}
 	}
 }
 
@@ -1018,10 +1025,10 @@ func (v InstamartAppView) RenderWithResult(ctx context.Context, w io.Writer) (In
 	}
 	if v.StartTracking {
 		m.screen = instamartScreenLoading
-		m.loading = "Looking for active orders..."
+		m.loading = "GET /instamart/orders?active=true..."
 	}
 	if selectedAddress == nil && !v.StartTracking {
-		m.err = "Choose a deployment address from the main menu."
+		m.err = "Choose address_id from the main menu."
 	}
 	if v.Service == nil {
 		m.screen = instamartScreenMessage
@@ -1164,7 +1171,7 @@ func displayErr(prefix string, err error) string {
 	case err == nil:
 		return prefix
 	case errors.Is(err, appinstamart.ErrAddressRequired):
-		return prefix + ": choose a deployment address first."
+		return prefix + ": choose address_id first."
 	case errors.Is(err, appinstamart.ErrVariantRequired):
 		return prefix + ": choose an exact product variation."
 	case errors.Is(err, appinstamart.ErrCartEmpty):

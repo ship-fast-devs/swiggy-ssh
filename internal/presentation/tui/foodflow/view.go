@@ -134,7 +134,7 @@ func (m foodModel) screenMode() string {
 	case foodScreenHome:
 		return "home"
 	case foodScreenSearchInput:
-		return "grep"
+		return "search"
 	case foodScreenRestaurantList:
 		return "restaurants"
 	case foodScreenMenuBrowse:
@@ -152,13 +152,13 @@ func (m foodModel) screenMode() string {
 	case foodScreenCoupons:
 		return "coupons"
 	case foodScreenCheckoutConfirm:
-		return "deploy"
+		return "checkout"
 	case foodScreenOrderResult:
-		return "logs"
+		return "response"
 	case foodScreenOrders:
 		return "history"
 	case foodScreenTracking:
-		return "tail"
+		return "track"
 	default:
 		return "message"
 	}
@@ -170,15 +170,15 @@ func (m foodModel) footer() string {
 		return footerLine(
 			KeyHint{Key: "j/k", Label: "move"},
 			KeyHint{Key: "1-4", Label: "select"},
-			KeyHint{Key: "/", Label: "search restaurants"},
-			KeyHint{Key: "d", Label: "search dish"},
-			KeyHint{Key: "c", Label: "cart"},
+			KeyHint{Key: "/", Label: "GET restaurants"},
+			KeyHint{Key: "d", Label: "GET dishes"},
+			KeyHint{Key: "c", Label: "GET cart"},
 			KeyHint{Key: "esc", Label: "main"},
 			KeyHint{Key: "q", Label: "quit"},
 		)
 	case foodScreenSearchInput:
 		return footerLine(
-			KeyHint{Key: "enter", Label: "open results"},
+			KeyHint{Key: "enter", Label: "open response"},
 			KeyHint{Key: "esc", Label: "home"},
 			KeyHint{Key: "q", Label: "quit"},
 		)
@@ -186,19 +186,19 @@ func (m foodModel) footer() string {
 		return footerLine(
 			KeyHint{Key: "j/k", Label: "move"},
 			KeyHint{Key: "1-9", Label: "choose"},
-			KeyHint{Key: "enter", Label: "open menu"},
+			KeyHint{Key: "enter", Label: "GET menu"},
 			KeyHint{Key: "esc", Label: "home"},
 		)
 	case foodScreenMenuBrowse:
 		return footerLine(
 			KeyHint{Key: "j/k", Label: "move"},
-			KeyHint{Key: "enter", Label: "add to cart"},
-			KeyHint{Key: "s", Label: "search dish"},
+			KeyHint{Key: "enter", Label: "POST item"},
+			KeyHint{Key: "s", Label: "GET dishes"},
 			KeyHint{Key: "esc", Label: "back"},
 		)
 	case foodScreenMenuSearch:
 		return footerLine(
-			KeyHint{Key: "enter", Label: "open results"},
+			KeyHint{Key: "enter", Label: "open response"},
 			KeyHint{Key: "esc", Label: "home"},
 			KeyHint{Key: "q", Label: "quit"},
 		)
@@ -206,21 +206,21 @@ func (m foodModel) footer() string {
 		return footerLine(
 			KeyHint{Key: "j/k", Label: "move"},
 			KeyHint{Key: "1-9", Label: "choose"},
-			KeyHint{Key: "enter", Label: "add to cart"},
+			KeyHint{Key: "enter", Label: "POST item"},
 			KeyHint{Key: "esc", Label: "home"},
 		)
 	case foodScreenItemDetail:
 		return footerLine(
 			KeyHint{Key: "j/k", Label: "variant"},
 			KeyHint{Key: "tab", Label: "next group"},
-			KeyHint{Key: "enter", Label: "add to cart"},
+			KeyHint{Key: "enter", Label: "POST item"},
 			KeyHint{Key: "esc", Label: "back"},
 		)
 	case foodScreenCartReview:
 		hints := []KeyHint{
-			{Key: "p/enter", Label: "checkout"},
-			{Key: "c", Label: "coupons"},
-			{Key: "/", Label: "search dish"},
+			{Key: "p/enter", Label: "POST checkout"},
+			{Key: "c", Label: "GET coupons"},
+			{Key: "/", Label: "GET dishes"},
 			{Key: "b", Label: "home"},
 		}
 		if m.cartReviewOverflows() {
@@ -231,18 +231,18 @@ func (m foodModel) footer() string {
 		return footerLine(
 			KeyHint{Key: "j/k", Label: "move"},
 			KeyHint{Key: "1-9", Label: "select"},
-			KeyHint{Key: "enter", Label: "apply"},
+			KeyHint{Key: "enter", Label: "POST coupon"},
 			KeyHint{Key: "b/esc", Label: "back"},
 		)
 	case foodScreenCheckoutConfirm:
 		return footerLine(
-			KeyHint{Key: "y", Label: "place order"},
+			KeyHint{Key: "y", Label: "send request"},
 			KeyHint{Key: "n", Label: "cancel"},
 		)
 	case foodScreenOrders:
 		return footerLine(
 			KeyHint{Key: "j/k", Label: "move"},
-			KeyHint{Key: "enter", Label: "tail"},
+			KeyHint{Key: "enter", Label: "track"},
 			KeyHint{Key: "b", Label: "home"},
 		)
 	default:
