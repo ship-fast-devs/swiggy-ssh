@@ -12,7 +12,7 @@ import (
 // InstamartPlaceholderView is the backward-compat alias used by runSession.
 // Renders the full Instamart screen with placeholder/zero values.
 type InstamartPlaceholderView struct {
-	UserID        string
+	SSHIdentityID string
 	StatusMessage string
 	In            io.Reader
 }

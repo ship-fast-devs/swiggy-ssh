@@ -35,17 +35,14 @@ func NewStartTerminalSessionUseCase(repo SessionRepository) *StartTerminalSessio
 }
 
 func (uc *StartTerminalSessionUseCase) Execute(ctx context.Context, input StartTerminalSessionInput) (TerminalSession, error) {
-	var userID *string
 	var sshIdentityID *string
 	if input.ResolvedIdentity != nil {
-		userID = &input.ResolvedIdentity.User.ID
 		sshIdentityID = &input.ResolvedIdentity.SSHIdentity.ID
 	}
 
 	return uc.repo.CreateTerminalSession(ctx, TerminalSession{
 		Client:            input.Client,
 		ClientSessionID:   input.ClientSessionID,
-		UserID:            userID,
 		SSHIdentityID:     sshIdentityID,
 		SSHFingerprint:    input.SSHFingerprint,
 		CurrentScreen:     input.CurrentScreen,

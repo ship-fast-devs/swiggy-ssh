@@ -51,7 +51,7 @@ func (m *testAuthAttemptService) ClaimAuthAttempt(_ context.Context, _ string) (
 		return auth.BrowserAuthAttempt{}, m.completeErr
 	}
 	m.claimed = true
-	return auth.BrowserAuthAttempt{UserID: "user-1", Status: auth.AuthAttemptStatusClaimed, CodeVerifier: "verifier-1"}, nil
+	return auth.BrowserAuthAttempt{SSHIdentityID: "identity-1", Status: auth.AuthAttemptStatusClaimed, CodeVerifier: "verifier-1"}, nil
 }
 
 func (m *testAuthAttemptService) CompleteClaimedAuthAttempt(_ context.Context, _ string) error {
@@ -111,7 +111,7 @@ type testAuthRepo struct {
 	upserts int
 }
 
-func (r *testAuthRepo) FindOAuthAccountByUserAndProvider(context.Context, string, string) (auth.OAuthAccount, error) {
+func (r *testAuthRepo) FindOAuthAccountBySSHIdentityAndProvider(context.Context, string, string) (auth.OAuthAccount, error) {
 	return auth.OAuthAccount{}, auth.ErrOAuthAccountNotFound
 }
 

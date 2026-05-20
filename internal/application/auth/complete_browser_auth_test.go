@@ -69,7 +69,7 @@ func (p *callbackProvider) ExchangeBrowserAuthCallback(_ context.Context, input 
 	return auth.BrowserAuthCredentials{AccessToken: "token-1", TokenExpiresAt: &expires, Scopes: []string{"mcp:tools"}}, nil
 }
 
-func (r *countingAuthRepo) FindOAuthAccountByUserAndProvider(context.Context, string, string) (auth.OAuthAccount, error) {
+func (r *countingAuthRepo) FindOAuthAccountBySSHIdentityAndProvider(context.Context, string, string) (auth.OAuthAccount, error) {
 	return auth.OAuthAccount{}, auth.ErrOAuthAccountNotFound
 }
 
@@ -82,9 +82,9 @@ func (r *countingAuthRepo) UpsertOAuthAccount(_ context.Context, account auth.OA
 func TestCompleteBrowserAuthClaimsBeforeAccountWrite(t *testing.T) {
 	repo := &countingAuthRepo{}
 	svc := &claimAttemptService{attempt: auth.BrowserAuthAttempt{
-		UserID:    "user-1",
-		Status:    auth.AuthAttemptStatusPending,
-		ExpiresAt: time.Now().UTC().Add(time.Minute),
+		SSHIdentityID: "identity-1",
+		Status:        auth.AuthAttemptStatusPending,
+		ExpiresAt:     time.Now().UTC().Add(time.Minute),
 	}}
 	useCase := auth.NewCompleteBrowserAuthUseCase(repo, svc)
 
@@ -120,10 +120,10 @@ func TestCompleteBrowserAuthReplayDoesNotUpsertAccount(t *testing.T) {
 func TestCompleteBrowserAuthCallbackUsesClaimedVerifier(t *testing.T) {
 	repo := &countingAuthRepo{}
 	svc := &claimAttemptService{attempt: auth.BrowserAuthAttempt{
-		UserID:       "user-1",
-		Status:       auth.AuthAttemptStatusPending,
-		CodeVerifier: "verifier-1",
-		ExpiresAt:    time.Now().UTC().Add(time.Minute),
+		SSHIdentityID: "identity-1",
+		Status:        auth.AuthAttemptStatusPending,
+		CodeVerifier:  "verifier-1",
+		ExpiresAt:     time.Now().UTC().Add(time.Minute),
 	}}
 	callback := &callbackProvider{}
 	useCase := auth.NewCompleteBrowserAuthUseCase(repo, svc, callback)
@@ -140,13 +140,13 @@ func TestCompleteBrowserAuthCallbackUsesClaimedVerifier(t *testing.T) {
 	}
 }
 
-func TestCompleteBrowserAuthCallbackPersistsFirstLoginAccountForAttemptUser(t *testing.T) {
+func TestCompleteBrowserAuthCallbackPersistsFirstLoginAccountForAttemptIdentity(t *testing.T) {
 	repo := &countingAuthRepo{}
 	svc := &claimAttemptService{attempt: auth.BrowserAuthAttempt{
-		UserID:       "first-login-user",
-		Status:       auth.AuthAttemptStatusPending,
-		CodeVerifier: "verifier-1",
-		ExpiresAt:    time.Now().UTC().Add(time.Minute),
+		SSHIdentityID: "first-login-identity",
+		Status:        auth.AuthAttemptStatusPending,
+		CodeVerifier:  "verifier-1",
+		ExpiresAt:     time.Now().UTC().Add(time.Minute),
 	}}
 	callback := &callbackProvider{}
 	useCase := auth.NewCompleteBrowserAuthUseCase(repo, svc, callback)
@@ -155,21 +155,21 @@ func TestCompleteBrowserAuthCallbackPersistsFirstLoginAccountForAttemptUser(t *t
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if repo.upserted.UserID != "first-login-user" {
-		t.Fatalf("expected account for first-login-user, got %q", repo.upserted.UserID)
+	if repo.upserted.SSHIdentityID != "first-login-identity" {
+		t.Fatalf("expected account for first-login-identity, got %q", repo.upserted.SSHIdentityID)
 	}
-	if result.Account.UserID != "first-login-user" {
-		t.Fatalf("expected result account for first-login-user, got %q", result.Account.UserID)
+	if result.Account.SSHIdentityID != "first-login-identity" {
+		t.Fatalf("expected result account for first-login-identity, got %q", result.Account.SSHIdentityID)
 	}
 }
 
 func TestCompleteBrowserAuthCallbackFailedExchangeDoesNotComplete(t *testing.T) {
 	repo := &countingAuthRepo{}
 	svc := &claimAttemptService{attempt: auth.BrowserAuthAttempt{
-		UserID:       "user-1",
-		Status:       auth.AuthAttemptStatusPending,
-		CodeVerifier: "verifier-1",
-		ExpiresAt:    time.Now().UTC().Add(time.Minute),
+		SSHIdentityID: "identity-1",
+		Status:        auth.AuthAttemptStatusPending,
+		CodeVerifier:  "verifier-1",
+		ExpiresAt:     time.Now().UTC().Add(time.Minute),
 	}}
 	useCase := auth.NewCompleteBrowserAuthUseCase(repo, svc, &callbackProvider{err: auth.ErrBrowserAuthProviderCallback})
 
@@ -194,8 +194,8 @@ func TestCompleteBrowserAuthGuestAttemptDoesNotCompleteOrUpsert(t *testing.T) {
 	useCase := auth.NewCompleteBrowserAuthUseCase(repo, svc)
 
 	_, err := useCase.Execute(context.Background(), "opaque")
-	if !errors.Is(err, auth.ErrOAuthAccountUserRequired) {
-		t.Fatalf("expected ErrOAuthAccountUserRequired, got %v", err)
+	if !errors.Is(err, auth.ErrSSHIdentityRequired) {
+		t.Fatalf("expected ErrSSHIdentityRequired, got %v", err)
 	}
 	if repo.upserts != 0 || svc.completed {
 		t.Fatalf("guest attempt must not persist or complete, got upserts=%d completed=%v", repo.upserts, svc.completed)
@@ -216,8 +216,8 @@ func TestCompleteBrowserAuthCallbackGuestAttemptDoesNotExchangeCompleteOrUpsert(
 	useCase := auth.NewCompleteBrowserAuthUseCase(repo, svc, callback)
 
 	_, err := useCase.ExecuteCallback(context.Background(), auth.BrowserAuthCallbackInput{State: "opaque", Code: "code-1"})
-	if !errors.Is(err, auth.ErrOAuthAccountUserRequired) {
-		t.Fatalf("expected ErrOAuthAccountUserRequired, got %v", err)
+	if !errors.Is(err, auth.ErrSSHIdentityRequired) {
+		t.Fatalf("expected ErrSSHIdentityRequired, got %v", err)
 	}
 	if callback.exchanges != 0 {
 		t.Fatalf("guest callback must not exchange provider token, got %d exchanges", callback.exchanges)

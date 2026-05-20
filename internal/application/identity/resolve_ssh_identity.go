@@ -9,7 +9,6 @@ import (
 	domainidentity "swiggy-ssh/internal/domain/identity"
 )
 
-type User = domainidentity.User
 type SSHIdentity = domainidentity.SSHIdentity
 type Repository = domainidentity.Repository
 type SessionIdentity = domainidentity.SessionIdentity
@@ -74,17 +73,7 @@ func resolveExistingSSHIdentity(ctx context.Context, repo Repository, client, fi
 		return SessionIdentity{}, err
 	}
 
-	if err := repo.UpdateUserLastSeen(ctx, sshIdentity.UserID, resolvedAt); err != nil {
-		return SessionIdentity{}, err
-	}
-
-	user, err := repo.FindUserByID(ctx, sshIdentity.UserID)
-	if err != nil {
-		return SessionIdentity{}, err
-	}
-
 	sshIdentity.LastSeenAt = &resolvedAt
-	user.LastSeenAt = &resolvedAt
 
-	return SessionIdentity{Client: client, User: user, SSHIdentity: sshIdentity}, nil
+	return SessionIdentity{Client: client, SSHIdentity: sshIdentity}, nil
 }

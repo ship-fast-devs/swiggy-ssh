@@ -13,13 +13,13 @@ type Service interface {
 
 // Identity represents a successfully authenticated principal.
 type Identity struct {
-	UserID string
+	SSHIdentityID string
 }
 
 // OAuthAccount represents provider linkage and token state.
 type OAuthAccount struct {
 	ID             string
-	UserID         string
+	SSHIdentityID  string
 	Provider       string
 	ProviderUserID *string
 	// AccessToken holds the plaintext access token value.
@@ -36,7 +36,7 @@ type OAuthAccount struct {
 // Repository is the auth persistence boundary.
 type Repository interface {
 	UpsertOAuthAccount(ctx context.Context, account OAuthAccount) (OAuthAccount, error)
-	FindOAuthAccountByUserAndProvider(ctx context.Context, userID, provider string) (OAuthAccount, error)
+	FindOAuthAccountBySSHIdentityAndProvider(ctx context.Context, sshIdentityID, provider string) (OAuthAccount, error)
 }
 
 // BrowserAuthAttempt status values.
@@ -58,7 +58,7 @@ type BrowserAuthAttempt struct {
 	TokenHash         string // SHA-256 hex of raw attempt token; raw token is never stored
 	CodeHash          string // Deprecated compatibility alias of TokenHash.
 	CodeVerifier      string // OAuth PKCE private verifier; never log, render, or expose to clients.
-	UserID            string
+	SSHIdentityID     string
 	TerminalSessionID string
 	Status            string // pending | claimed | completed | cancelled
 	ExpiresAt         time.Time
@@ -119,11 +119,11 @@ func ValidateTokenForUse(account OAuthAccount, now time.Time) error {
 	return nil
 }
 
-// ErrOAuthAccountNotFound is returned by Repository when no OAuth account exists for the given user/provider pair.
+// ErrOAuthAccountNotFound is returned by Repository when no OAuth account exists for the given SSH identity/provider pair.
 var ErrOAuthAccountNotFound = errors.New("oauth account not found")
 
-// ErrOAuthAccountUserRequired is returned when account lookup or persistence is requested without a durable user.
-var ErrOAuthAccountUserRequired = errors.New("oauth account requires a durable user")
+// ErrSSHIdentityRequired is returned when account lookup or persistence is requested without a durable SSH identity.
+var ErrSSHIdentityRequired = errors.New("oauth account requires a durable ssh identity")
 
 // ErrAccountRevoked is surfaced to callers when the OAuth account has been revoked.
 var ErrAccountRevoked = errors.New("oauth account has been revoked")
@@ -148,7 +148,7 @@ var ErrLoginCodeAlreadyUsed = ErrAuthAttemptAlreadyUsed
 type BrowserAuthAttemptService interface {
 	// IssueAuthAttempt generates an opaque high-entropy token, hashes it, persists the
 	// BrowserAuthAttempt record, and returns the raw token (shown only in the direct login URL).
-	IssueAuthAttempt(ctx context.Context, userID, terminalSessionID string) (rawToken string, record BrowserAuthAttempt, err error)
+	IssueAuthAttempt(ctx context.Context, sshIdentityID, terminalSessionID string) (rawToken string, record BrowserAuthAttempt, err error)
 
 	// GetAuthAttempt looks up the record by raw token. Returns ErrAuthAttemptNotFound if
 	// the key has expired or was never issued.
@@ -214,7 +214,7 @@ type BrowserAuthCallbackProvider interface {
 type LoginCodeService interface {
 	BrowserAuthAttemptService
 
-	IssueLoginCode(ctx context.Context, userID, terminalSessionID string) (rawCode string, record LoginCode, err error)
+	IssueLoginCode(ctx context.Context, sshIdentityID, terminalSessionID string) (rawCode string, record LoginCode, err error)
 
 	// GetLoginCode looks up the record by raw code. Returns ErrLoginCodeNotFound if
 	// the key has expired or was never issued.

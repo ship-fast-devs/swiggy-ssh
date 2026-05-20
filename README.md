@@ -126,12 +126,12 @@ Every variable is documented with inline comments in `.env.example`.
 
 ## How the auth flow works
 
-1. **SSH connect** — your Ed25519 public key fingerprint is used to look up or create your user record in Postgres.
-2. **Home / Instamart selection** — the SSH TUI opens at the home screen. Auth starts when the user selects Instamart.
+1. **SSH connect** — your Ed25519 public key fingerprint is used to look up an existing durable SSH identity. Unknown or no-key connections start as guest sessions.
+2. **Home / Instamart selection** — the SSH TUI opens at the home screen. Auth starts when the user selects Instamart; an unknown public key is registered as a durable SSH identity at this point.
 3. **Browser auth attempt** — a short-lived one-time auth attempt is issued. Only a SHA-256 hash of the public attempt token is used as the Redis key; PKCE verifier material is stored only in the TTL-limited Redis value.
 4. **Swiggy OAuth** — open the terminal URL. `/auth/start` redirects to `https://mcp.swiggy.com/auth/authorize` with OAuth 2.1 + PKCE params. Swiggy redirects back to `/auth/callback` with `code` and `state`.
 5. **Token exchange** — the server exchanges `code + code_verifier` at `https://mcp.swiggy.com/auth/token`, encrypts the returned access token, and marks the auth attempt completed. The SSH session polls every 2 seconds.
-6. **Returning users** — if your account is already valid, the browser-auth step is skipped and the session proceeds to the Instamart placeholder.
+6. **Returning identities** — if your OAuth account is already valid for this SSH identity, the browser-auth step is skipped and the session proceeds to the Instamart placeholder.
 
 ---
 
@@ -145,7 +145,7 @@ cmd/
 internal/
   domain/               # Entities, domain errors, and ports only
     auth/               # OAuthAccount, LoginCode, auth ports
-    identity/           # User, SSHIdentity, TerminalSession, identity ports
+    identity/           # SSHIdentity, TerminalSession, identity ports
     instamart/          # Instamart domain (stub, in progress)
   application/          # Client-agnostic use cases
     auth/               # EnsureValidAccountUseCase.Execute orchestration
@@ -275,7 +275,7 @@ Check containers are healthy: `make ps`. Verify `DATABASE_URL` and `REDIS_URL` m
 ```sql
 UPDATE oauth_accounts
 SET status = 'reconnect_required'
-WHERE user_id = '<your-user-id>';
+WHERE ssh_identity_id = '<your-ssh-identity-id>';
 ```
 Then reconnect via SSH — a new login code will be issued automatically.
 

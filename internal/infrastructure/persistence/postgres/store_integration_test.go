@@ -59,8 +59,7 @@ func cleanupTables(t *testing.T, store *PostgresStore) {
 			audit_events,
 			terminal_sessions,
 			oauth_accounts,
-			ssh_identities,
-			users
+			ssh_identities
 		RESTART IDENTITY
 	`)
 	if err != nil {
@@ -68,59 +67,12 @@ func cleanupTables(t *testing.T, store *PostgresStore) {
 	}
 }
 
-func TestUserCreateFindUpdate(t *testing.T) {
-	ctx := context.Background()
-	store := newTestStore(t)
-
-	email := "dev@example.com"
-	created, err := store.CreateUser(ctx, identity.User{
-		DisplayName: "Dev User",
-		Email:       &email,
-	})
-	if err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-
-	if created.ID == "" {
-		t.Fatal("expected user id to be generated")
-	}
-
-	found, err := store.FindUserByID(ctx, created.ID)
-	if err != nil {
-		t.Fatalf("find user: %v", err)
-	}
-
-	if found.DisplayName != "Dev User" {
-		t.Fatalf("expected display name Dev User, got %s", found.DisplayName)
-	}
-
-	lastSeen := time.Now().UTC().Truncate(time.Microsecond)
-	if err := store.UpdateUserLastSeen(ctx, created.ID, lastSeen); err != nil {
-		t.Fatalf("update user last seen: %v", err)
-	}
-
-	updated, err := store.FindUserByID(ctx, created.ID)
-	if err != nil {
-		t.Fatalf("find updated user: %v", err)
-	}
-
-	if updated.LastSeenAt == nil {
-		t.Fatal("expected last_seen_at to be set")
-	}
-}
-
 func TestSSHIdentityCreateFindUpdate(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
 
-	createdUser, err := store.CreateUser(ctx, identity.User{DisplayName: "SSH User"})
-	if err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-
 	label := "laptop"
 	createdIdentity, err := store.CreateSSHIdentity(ctx, identity.SSHIdentity{
-		UserID:               createdUser.ID,
 		PublicKeyFingerprint: "SHA256:test-fingerprint",
 		PublicKey:            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest test@example.com",
 		Label:                &label,
@@ -136,10 +88,6 @@ func TestSSHIdentityCreateFindUpdate(t *testing.T) {
 	found, err := store.FindSSHIdentityByFingerprint(ctx, "SHA256:test-fingerprint")
 	if err != nil {
 		t.Fatalf("find ssh identity: %v", err)
-	}
-
-	if found.UserID != createdUser.ID {
-		t.Fatalf("expected user_id %s, got %s", createdUser.ID, found.UserID)
 	}
 
 	lastSeen := time.Now().UTC().Truncate(time.Microsecond)
@@ -161,50 +109,20 @@ func TestSSHIdentityCreateFindUpdate(t *testing.T) {
 	}
 }
 
-func TestCreateUserWithSSHIdentity(t *testing.T) {
-	ctx := context.Background()
-	store := newTestStore(t)
-
-	lastSeen := time.Now().UTC().Truncate(time.Microsecond)
-	createdUser, createdIdentity, err := store.CreateUserWithSSHIdentity(ctx,
-		identity.User{DisplayName: "Tx User", LastSeenAt: &lastSeen},
-		identity.SSHIdentity{
-			PublicKeyFingerprint: "SHA256:tx-fingerprint",
-			PublicKey:            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITx tx@example.com",
-			LastSeenAt:           &lastSeen,
-		},
-	)
-	if err != nil {
-		t.Fatalf("create user with ssh identity: %v", err)
-	}
-
-	if createdUser.ID == "" {
-		t.Fatal("expected user id")
-	}
-	if createdIdentity.UserID != createdUser.ID {
-		t.Fatalf("expected identity user_id %s, got %s", createdUser.ID, createdIdentity.UserID)
-	}
-
-	foundIdentity, err := store.FindSSHIdentityByFingerprint(ctx, "SHA256:tx-fingerprint")
-	if err != nil {
-		t.Fatalf("find ssh identity: %v", err)
-	}
-	if foundIdentity.UserID != createdUser.ID {
-		t.Fatalf("expected identity user_id %s, got %s", createdUser.ID, foundIdentity.UserID)
-	}
-}
-
 func TestOAuthAccountUpsertAndFind(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
 
-	user, err := store.CreateUser(ctx, identity.User{DisplayName: "OAuth User"})
+	sshIdentity, err := store.CreateSSHIdentity(ctx, identity.SSHIdentity{
+		PublicKeyFingerprint: "SHA256:oauth-fingerprint",
+		PublicKey:            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIoauth oauth@example.com",
+	})
 	if err != nil {
-		t.Fatalf("create user: %v", err)
+		t.Fatalf("create ssh identity: %v", err)
 	}
 
 	inserted, err := store.UpsertOAuthAccount(ctx, auth.OAuthAccount{
-		UserID:         user.ID,
+		SSHIdentityID:  sshIdentity.ID,
 		Provider:       "swiggy",
 		AccessToken:    "enc-token-1",
 		TokenExpiresAt: nil,
@@ -219,7 +137,7 @@ func TestOAuthAccountUpsertAndFind(t *testing.T) {
 		t.Fatalf("expected nil token_expires_at on insert, got %v", *inserted.TokenExpiresAt)
 	}
 
-	foundInserted, err := store.FindOAuthAccountByUserAndProvider(ctx, user.ID, "swiggy")
+	foundInserted, err := store.FindOAuthAccountBySSHIdentityAndProvider(ctx, sshIdentity.ID, "swiggy")
 	if err != nil {
 		t.Fatalf("find inserted oauth account: %v", err)
 	}
@@ -234,7 +152,7 @@ func TestOAuthAccountUpsertAndFind(t *testing.T) {
 
 	expiresAt := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Microsecond)
 	updated, err := store.UpsertOAuthAccount(ctx, auth.OAuthAccount{
-		UserID:         user.ID,
+		SSHIdentityID:  sshIdentity.ID,
 		Provider:       "swiggy",
 		AccessToken:    "enc-token-2",
 		TokenExpiresAt: &expiresAt,
@@ -253,7 +171,7 @@ func TestOAuthAccountUpsertAndFind(t *testing.T) {
 		t.Fatalf("expected encrypted_access_token enc-token-2, got <redacted>")
 	}
 
-	foundUpdated, err := store.FindOAuthAccountByUserAndProvider(ctx, user.ID, "swiggy")
+	foundUpdated, err := store.FindOAuthAccountBySSHIdentityAndProvider(ctx, sshIdentity.ID, "swiggy")
 	if err != nil {
 		t.Fatalf("find updated oauth account: %v", err)
 	}
@@ -271,13 +189,7 @@ func TestTerminalSessionCreateAndEndLifecycle(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
 
-	user, err := store.CreateUser(ctx, identity.User{DisplayName: "Terminal User"})
-	if err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-
 	sshIdentity, err := store.CreateSSHIdentity(ctx, identity.SSHIdentity{
-		UserID:               user.ID,
 		PublicKeyFingerprint: "SHA256:terminal-fingerprint",
 		PublicKey:            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIterminal terminal@example.com",
 	})
@@ -288,7 +200,6 @@ func TestTerminalSessionCreateAndEndLifecycle(t *testing.T) {
 	fingerprint := sshIdentity.PublicKeyFingerprint
 	selectedAddress := identity.SelectedAddressIDUnsetPlaceholder
 	created, err := store.CreateTerminalSession(ctx, identity.TerminalSession{
-		UserID:            &user.ID,
 		SSHIdentityID:     &sshIdentity.ID,
 		SSHFingerprint:    &fingerprint,
 		Client:            identity.ClientProtocolSSH,
@@ -302,9 +213,6 @@ func TestTerminalSessionCreateAndEndLifecycle(t *testing.T) {
 
 	if created.ID == "" {
 		t.Fatal("expected terminal session id")
-	}
-	if created.UserID == nil || *created.UserID != user.ID {
-		t.Fatalf("expected user_id %s", user.ID)
 	}
 	if created.SSHIdentityID == nil || *created.SSHIdentityID != sshIdentity.ID {
 		t.Fatalf("expected ssh_identity_id %s", sshIdentity.ID)
@@ -349,5 +257,42 @@ func TestTerminalSessionCreateAndEndLifecycle(t *testing.T) {
 	}
 	if gotEndedAt.IsZero() {
 		t.Fatal("expected ended_at to be set")
+	}
+}
+
+func TestAttachSSHIdentityToGuestTerminalSession(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	created, err := store.CreateTerminalSession(ctx, identity.TerminalSession{
+		Client:          identity.ClientProtocolSSH,
+		ClientSessionID: "guest-conn-hex",
+		CurrentScreen:   identity.ScreenSSHSessionPlaceholder,
+	})
+	if err != nil {
+		t.Fatalf("create guest terminal session: %v", err)
+	}
+	if created.SSHIdentityID != nil {
+		t.Fatalf("guest session must start without ssh identity, got %s", *created.SSHIdentityID)
+	}
+
+	sshIdentity, err := store.CreateSSHIdentity(ctx, identity.SSHIdentity{
+		PublicKeyFingerprint: "SHA256:first-login-fingerprint",
+		PublicKey:            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIfirst first@example.com",
+	})
+	if err != nil {
+		t.Fatalf("create ssh identity: %v", err)
+	}
+
+	if err := store.AttachSSHIdentityToTerminalSession(ctx, created.ID, sshIdentity.ID); err != nil {
+		t.Fatalf("attach ssh identity: %v", err)
+	}
+
+	var attachedID string
+	if err := store.pool.QueryRow(ctx, `SELECT ssh_identity_id FROM terminal_sessions WHERE id = $1`, created.ID).Scan(&attachedID); err != nil {
+		t.Fatalf("query attached identity: %v", err)
+	}
+	if attachedID != sshIdentity.ID {
+		t.Fatalf("expected attached identity %s, got %s", sshIdentity.ID, attachedID)
 	}
 }
