@@ -40,7 +40,7 @@ func (m instamartModel) cartReviewOverflows() bool {
 
 func (m instamartModel) cartReviewLines() []string {
 	cart := m.currentCart
-	lines := []string{brandStyle.Render(" GET /instamart/cart 200 OK"), mutedStyle.Render("context") + " address_id=" + defaultString(cart.AddressID, m.selectedAddressID()) + " · " + boldStyle.Render(defaultString(cart.AddressLabel, selectedAddressLabel(m.selectedAddress))) + creamStyle.Render(" — "+redactLine(cart.AddressDisplayLine))}
+	lines := []string{brandStyle.Render(" cart diff"), mutedStyle.Render("context") + " address_id=" + defaultString(cart.AddressID, m.selectedAddressID()) + " · " + boldStyle.Render(defaultString(cart.AddressLabel, selectedAddressLabel(m.selectedAddress))) + creamStyle.Render(" — "+redactLine(cart.AddressDisplayLine))}
 	if len(cart.StoreIDs) > 1 {
 		lines = append(lines, " "+accentStyle.Render(fmt.Sprintf("risk: cart spans %d stores; Swiggy may split checkout.", len(cart.StoreIDs))))
 	}
@@ -62,7 +62,7 @@ func (m instamartModel) cartReviewLines() []string {
 		toPayValue = fmt.Sprintf("Rs %d", cart.TotalRupees)
 	}
 	lines = append(lines, diffText("+", boldStyle.Render(fmt.Sprintf("%-43s %s", toPayLabel, toPayValue))))
-	lines = append(lines, mutedStyle.Render("available_payment_methods")+" "+defaultString(strings.Join(cart.AvailablePaymentMethods, ", "), "none"), mutedStyle.Render("next")+" POST /instamart/checkout")
+	lines = append(lines, mutedStyle.Render("available_payment_methods")+" "+defaultString(strings.Join(cart.AvailablePaymentMethods, ", "), "none"), mutedStyle.Render("next")+" ship cart")
 	return lines
 }
 
@@ -105,21 +105,21 @@ func billLineSign(bill domaininstamart.BillLine) string {
 }
 
 func (m instamartModel) renderCheckoutConfirm(sb *strings.Builder) {
-	sb.WriteString(centeredLine(brandStyle.Render("POST /instamart/checkout confirm required")))
+	sb.WriteString(centeredLine(brandStyle.Render("Ship cart?")))
 	sb.WriteString(line(""))
 	sb.WriteString(centeredLine("body address_id=" + m.selectedAddressID()))
 	sb.WriteString(centeredLine("body payment_method=" + m.paymentMethod + " · total=" + fmt.Sprintf("Rs %d", cartToPayRupees(m.currentCart))))
 	sb.WriteString(line(""))
-	sb.WriteString(centeredLine(mutedStyle.Render("risk: this sends a checkout request")))
+	sb.WriteString(centeredLine(mutedStyle.Render("this places the reviewed Instamart cart")))
 	if len(m.currentCart.StoreIDs) > 1 {
 		sb.WriteString(centeredLine(accentStyle.Render(fmt.Sprintf("%d stores; Swiggy may split checkout", len(m.currentCart.StoreIDs)))))
 	}
 	sb.WriteString(line(""))
-	sb.WriteString(centeredLine("y send request / n cancel"))
+	sb.WriteString(centeredLine("y confirm / n cancel"))
 }
 
 func (m instamartModel) renderOrderResult(sb *strings.Builder) {
-	sb.WriteString(line(brandStyle.Render(" POST /instamart/checkout 201 Created")))
+	sb.WriteString(line(brandStyle.Render(" ship cart 201 Created")))
 	message := m.checkoutResult.Message
 	if message == "" {
 		message = "Checkout completed."
@@ -144,6 +144,7 @@ func (m instamartModel) renderOrderResult(sb *strings.Builder) {
 	if m.checkoutElapsed > 0 {
 		sb.WriteString(line(" response.elapsed: " + formatElapsed(m.checkoutElapsed)))
 	}
+	sb.WriteString(line(" next: " + boldStyle.Render("t") + " or " + boldStyle.Render("enter") + " tail -f order"))
 }
 
 func okLine(label string, ok bool) string {

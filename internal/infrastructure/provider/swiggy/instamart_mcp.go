@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"sync/atomic"
+
+	domaininstamart "swiggy-ssh/internal/domain/instamart"
 )
 
 const mcpJSONRPCVersion = "2.0"
@@ -146,6 +148,9 @@ func (c *MCPInstamartClient) callToolEnvelopeHTTP(ctx context.Context, name stri
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if resp.StatusCode == http.StatusUnauthorized {
+			return instamartToolEnvelope{}, fmt.Errorf("instamart mcp %s failed: %w", name, domaininstamart.ErrProviderUnauthorized)
+		}
 		return instamartToolEnvelope{}, fmt.Errorf("instamart mcp %s failed: http status %d", name, resp.StatusCode)
 	}
 

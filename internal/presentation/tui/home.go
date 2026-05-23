@@ -285,9 +285,15 @@ func (m homeModel) View() string {
 	var body strings.Builder
 	if m.addresses {
 		body.WriteString(line(""))
-		body.WriteString(line(brandStyle.Render(" GET /addresses 200 OK")))
-		body.WriteString(line(mutedStyle.Render(" response: saved delivery targets")))
-		if len(m.session.Addresses) == 0 {
+		if m.session.AddressStatus == HomeAddressUnavailable {
+			body.WriteString(line(errorStyle.Render(" GET /addresses failed")))
+			body.WriteString(line(mutedStyle.Render(" response: delivery targets unavailable")))
+			body.WriteString(line(" " + mutedStyle.Render("Could not load saved addresses. Reconnect or check Instamart provider config.")))
+		} else {
+			body.WriteString(line(brandStyle.Render(" GET /addresses 200 OK")))
+			body.WriteString(line(mutedStyle.Render(" response: saved delivery targets")))
+		}
+		if len(m.session.Addresses) == 0 && m.session.AddressStatus != HomeAddressUnavailable {
 			body.WriteString(line(" " + mutedStyle.Render("[] No saved addresses found. Add one in Swiggy first.")))
 		} else {
 			for i, address := range m.session.Addresses {

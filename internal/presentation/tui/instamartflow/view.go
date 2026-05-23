@@ -61,7 +61,11 @@ func (m instamartModel) View() string {
 	sb.WriteString(divider())
 	sb.WriteString(m.footer())
 	sb.WriteString(bottom())
-	return centerInViewport(sb.String(), m.viewport)
+	view := sb.String()
+	if m.quantityModalOpen {
+		view = placeOverlay(m.renderQuantityModal(), view)
+	}
+	return centerInViewport(view, m.viewport)
 }
 
 func (m instamartModel) bottomStatusLine() string {
@@ -139,6 +143,9 @@ func (m instamartModel) sessionCartCount() int {
 }
 
 func (m instamartModel) screenMode() string {
+	if m.quantityModalOpen {
+		return "request"
+	}
 	switch m.screen {
 	case instamartScreenStatic, instamartScreenHome:
 		return "home"
@@ -168,30 +175,33 @@ func (m instamartModel) screenMode() string {
 }
 
 func (m instamartModel) footer() string {
+	if m.quantityModalOpen {
+		return footerLine(KeyHint{Key: "+/-", Label: "qty"}, KeyHint{Key: "enter", Label: "add/update"}, KeyHint{Key: "esc", Label: "cancel"}, KeyHint{Key: "0", Label: "remove"})
+	}
 	switch m.screen {
 	case instamartScreenAddressSelect:
 		return footerLine(KeyHint{Key: "j/k", Label: "move"}, KeyHint{Key: "1-9", Label: "select"}, KeyHint{Key: "?", Label: "help"}, KeyHint{Key: "q", Label: "quit"})
 	case instamartScreenHome, instamartScreenStatic:
 		return footerLine(KeyHint{Key: "j/k", Label: "move"}, KeyHint{Key: "1-5", Label: "select"}, KeyHint{Key: "/", Label: "search"}, KeyHint{Key: "c", Label: "cart"}, KeyHint{Key: "esc", Label: "main"}, KeyHint{Key: "q", Label: "quit"})
 	case instamartScreenSearchInput:
-		return footerLine(KeyHint{Key: "enter", Label: "open results"}, KeyHint{Key: "esc", Label: "home"}, KeyHint{Key: "?", Label: "help"}, KeyHint{Key: "q", Label: "quit"})
+		return footerLine(KeyHint{Key: "up/down", Label: "select"}, KeyHint{Key: "enter", Label: "quantity"}, KeyHint{Key: "ctrl+k", Label: "cart diff"}, KeyHint{Key: "ctrl+b", Label: "home"}, KeyHint{Key: "esc", Label: "clear/home"}, KeyHint{Key: "?", Label: "help"})
 	case instamartScreenProductList:
-		return footerLine(KeyHint{Key: "j/k", Label: "move"}, KeyHint{Key: "1-9", Label: "choose"}, KeyHint{Key: "enter", Label: "choose"}, KeyHint{Key: "?", Label: "help"}, KeyHint{Key: "esc", Label: "home"})
+		return footerLine(KeyHint{Key: "j/k", Label: "move"}, KeyHint{Key: "1-9/enter", Label: "quantity"}, KeyHint{Key: "+/-", Label: "adjust qty"}, KeyHint{Key: "ctrl+k", Label: "cart diff"}, KeyHint{Key: "?", Label: "help"})
 	case instamartScreenQuantity:
-		return footerLine(KeyHint{Key: "+/-", Label: "quantity"}, KeyHint{Key: "enter", Label: "send"}, KeyHint{Key: "b/esc", Label: "response"}, KeyHint{Key: "?", Label: "help"})
+		return footerLine(KeyHint{Key: "+/-", Label: "qty"}, KeyHint{Key: "enter", Label: "add/update"}, KeyHint{Key: "esc", Label: "cancel"}, KeyHint{Key: "?", Label: "help"})
 	case instamartScreenCartReview:
-		hints := []KeyHint{{Key: "p/enter", Label: "checkout"}, {Key: "/", Label: "search"}, {Key: "b", Label: "home"}}
+		hints := []KeyHint{{Key: "p/enter", Label: "ship cart"}, {Key: "/", Label: "grep"}, {Key: "b", Label: "home"}}
 		if m.cartReviewOverflows() {
 			hints = append([]KeyHint{{Key: "j/k", Label: "scroll"}}, hints...)
 		}
 		return footerLine(hints...)
 	case instamartScreenCheckoutConfirm:
-		return footerLine(KeyHint{Key: "y", Label: "send"}, KeyHint{Key: "n", Label: "cancel"})
+		return footerLine(KeyHint{Key: "y", Label: "confirm"}, KeyHint{Key: "n", Label: "cancel"})
 	case instamartScreenOrders:
 		return footerLine(KeyHint{Key: "j/k", Label: "move"}, KeyHint{Key: "enter", Label: "track"}, KeyHint{Key: "?", Label: "help"}, KeyHint{Key: "b", Label: "home"})
 	case instamartScreenHelp:
 		return footerLine(KeyHint{Key: "?", Label: "back"}, KeyHint{Key: "b", Label: "back"}, KeyHint{Key: "q", Label: "quit"})
 	default:
-		return footerLine(KeyHint{Key: "enter", Label: "home"}, KeyHint{Key: "?", Label: "help"}, KeyHint{Key: "q", Label: "quit"})
+		return footerLine(KeyHint{Key: "enter", Label: "tail/home"}, KeyHint{Key: "?", Label: "help"}, KeyHint{Key: "q", Label: "quit"})
 	}
 }

@@ -11,3 +11,4 @@ var ErrCheckoutAmountLimit = errors.New("instamart: checkout amount limit exceed
 var ErrPaymentMethodUnavailable = errors.New("instamart: payment method unavailable")
 var ErrTrackingLocationUnavailable = errors.New("instamart: tracking location unavailable")
 var ErrCancellationUnsupported = errors.New("instamart: cancellation unsupported")
+var ErrProviderUnauthorized = errors.New("instamart: provider unauthorized")

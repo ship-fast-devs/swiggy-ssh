@@ -364,7 +364,7 @@ func TestInstamartViewRendersAddress(t *testing.T) {
 	for _, want := range []string{
 		"Work",
 		"cart=3",
-		"GET  /instamart/search",
+		"grep groceries",
 		"/ search",
 	} {
 		if !strings.Contains(out, want) {
@@ -385,7 +385,7 @@ func TestInstamartPlaceholderViewDelegates(t *testing.T) {
 
 	for _, want := range []string{
 		"env=instamart",
-		"GET  /instamart/search",
+		"grep groceries",
 		"Home", // default address label
 		"Guest session connected",
 	} {

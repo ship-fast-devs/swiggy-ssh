@@ -5,14 +5,18 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"io"
+	"log/slog"
 	"net"
 	"testing"
 	"time"
 
 	applicationauth "swiggy-ssh/internal/application/auth"
 	applicationidentity "swiggy-ssh/internal/application/identity"
+	applicationinstamart "swiggy-ssh/internal/application/instamart"
 	domainfood "swiggy-ssh/internal/domain/food"
 	domaininstamart "swiggy-ssh/internal/domain/instamart"
+	"swiggy-ssh/internal/presentation/tui"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -71,6 +75,44 @@ type serverSessionRepo struct {
 	created                   applicationidentity.TerminalSession
 	attachedTerminalSessionID string
 	attachedSSHIdentityID     string
+}
+
+type serverInstamartProvider struct {
+	addressesErr error
+}
+
+func (p serverInstamartProvider) GetAddresses(context.Context) ([]domaininstamart.Address, error) {
+	return nil, p.addressesErr
+}
+
+func (p serverInstamartProvider) SearchProducts(context.Context, string, string, int) (domaininstamart.ProductSearchResult, error) {
+	return domaininstamart.ProductSearchResult{}, nil
+}
+
+func (p serverInstamartProvider) YourGoToItems(context.Context, string, int) (domaininstamart.ProductSearchResult, error) {
+	return domaininstamart.ProductSearchResult{}, nil
+}
+
+func (p serverInstamartProvider) GetCart(context.Context) (domaininstamart.Cart, error) {
+	return domaininstamart.Cart{}, nil
+}
+
+func (p serverInstamartProvider) UpdateCart(context.Context, string, []domaininstamart.CartUpdateItem) (domaininstamart.Cart, error) {
+	return domaininstamart.Cart{}, nil
+}
+
+func (p serverInstamartProvider) ClearCart(context.Context) error { return nil }
+
+func (p serverInstamartProvider) Checkout(context.Context, string, string) (domaininstamart.CheckoutResult, error) {
+	return domaininstamart.CheckoutResult{}, nil
+}
+
+func (p serverInstamartProvider) GetOrders(context.Context, domaininstamart.OrderHistoryQuery) (domaininstamart.OrderHistory, error) {
+	return domaininstamart.OrderHistory{}, nil
+}
+
+func (p serverInstamartProvider) TrackOrder(context.Context, string, domaininstamart.Location) (domaininstamart.TrackingStatus, error) {
+	return domaininstamart.TrackingStatus{}, nil
 }
 
 func newServerIdentityRepo() *serverIdentityRepo {
@@ -223,6 +265,22 @@ func TestFoodAddressForSelectedDoesNotGuessWhenSelectionCannotBeMatched(t *testi
 	_, ok := foodAddressForSelected(foodAddresses, selected)
 	if ok {
 		t.Fatal("must not guess a Food address when the selected address cannot be matched")
+	}
+}
+
+func TestLoadSessionAddressesPreservesProviderUnauthorized(t *testing.T) {
+	server := &SSHServer{
+		logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		instamartSvc: applicationinstamart.NewService(serverInstamartProvider{addressesErr: domaininstamart.ErrProviderUnauthorized}),
+	}
+	state := sessionAddressState{authenticated: true, selectedIndex: 0, addressStatus: tui.HomeAddressSelected}
+
+	err := server.loadSessionAddresses(context.Background(), "identity-1", &state)
+	if !errors.Is(err, domaininstamart.ErrProviderUnauthorized) {
+		t.Fatalf("expected ErrProviderUnauthorized, got %v", err)
+	}
+	if state.addressStatus != tui.HomeAddressUnavailable || state.selectedIndex != -1 || len(state.addresses) != 0 {
+		t.Fatalf("unexpected address state after failure: %#v", state)
 	}
 }
 

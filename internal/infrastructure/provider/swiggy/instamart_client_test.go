@@ -63,6 +63,19 @@ func TestMCPClientPostsJSONRPCToolCallToConfiguredEndpoint(t *testing.T) {
 	}
 }
 
+func TestMCPClientUnauthorizedStatusMapsToProviderUnauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	client := NewMCPInstamartClient(server.URL, server.Client(), fakeAuthorizer{})
+	_, err := client.GetAddresses(context.Background())
+	if !errors.Is(err, domaininstamart.ErrProviderUnauthorized) {
+		t.Fatalf("expected ErrProviderUnauthorized, got %v", err)
+	}
+}
+
 func TestMCPClientSearchProductsRequestAndMapping(t *testing.T) {
 	var args map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

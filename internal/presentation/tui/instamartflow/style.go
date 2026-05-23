@@ -6,6 +6,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -31,8 +32,6 @@ var (
 	mutedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	boldStyle    = lipgloss.NewStyle().Bold(true)
 	cursorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#FC8019")).Bold(true)
-	yamlKeyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FC8019"))
-	yamlValStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFF7ED"))
 	diffAddStyle = lipgloss.NewStyle().Background(lipgloss.Color("#103D22"))
 	diffDelStyle = lipgloss.NewStyle().Background(lipgloss.Color("#4A1717"))
 )
@@ -149,6 +148,84 @@ func centerInViewport(content string, viewport Viewport) string {
 		sb.WriteString("\r\n")
 	}
 	return sb.String()
+}
+
+func placeOverlay(overlay, background string) string {
+	background = strings.TrimSuffix(background, "\r\n")
+	overlay = strings.TrimSuffix(overlay, "\r\n")
+	if overlay == "" || background == "" {
+		return background + "\r\n"
+	}
+
+	backgroundLines := strings.Split(background, "\r\n")
+	overlayLines := strings.Split(overlay, "\r\n")
+	backgroundWidth := 0
+	for _, backgroundLine := range backgroundLines {
+		if width := lipgloss.Width(backgroundLine); width > backgroundWidth {
+			backgroundWidth = width
+		}
+	}
+	overlayWidth := 0
+	for _, overlayLine := range overlayLines {
+		if width := lipgloss.Width(overlayLine); width > overlayWidth {
+			overlayWidth = width
+		}
+	}
+	x := (backgroundWidth - overlayWidth) / 2
+	if x < 0 {
+		x = 0
+	}
+	y := (len(backgroundLines) - len(overlayLines)) / 2
+	if y < 0 {
+		y = 0
+	}
+
+	for i, overlayLine := range overlayLines {
+		idx := y + i
+		if idx >= len(backgroundLines) {
+			break
+		}
+		backgroundLines[idx] = overlayLineAt(backgroundLines[idx], overlayLine, x, x+overlayWidth)
+	}
+	return strings.Join(backgroundLines, "\r\n") + "\r\n"
+}
+
+func overlayLineAt(background, overlay string, start, end int) string {
+	var prefix strings.Builder
+	var suffix strings.Builder
+	column := 0
+	for i := 0; i < len(background); {
+		if background[i] == '\x1b' {
+			j := i + 1
+			if j < len(background) && background[j] == '[' {
+				j++
+				for j < len(background) && (background[j] < '@' || background[j] > '~') {
+					j++
+				}
+				if j < len(background) {
+					j++
+				}
+				sequence := background[i:j]
+				if column < start {
+					prefix.WriteString(sequence)
+				} else if column >= end {
+					suffix.WriteString(sequence)
+				}
+				i = j
+				continue
+			}
+		}
+		r, size := utf8.DecodeRuneInString(background[i:])
+		width := lipgloss.Width(string(r))
+		if column+width <= start {
+			prefix.WriteRune(r)
+		} else if column >= end {
+			suffix.WriteRune(r)
+		}
+		column += width
+		i += size
+	}
+	return prefix.String() + "\x1b[0m" + overlay + "\x1b[0m" + suffix.String()
 }
 
 func ctxQuitCmd(ctx context.Context) tea.Cmd {
