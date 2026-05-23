@@ -3,11 +3,11 @@ package foodflow
 import "strings"
 
 func (m foodModel) renderHome(sb *strings.Builder) {
-	sb.WriteString(line(brandStyle.Render(" What would you like to order?")))
+	sb.WriteString(line(brandStyle.Render(" Food API")))
 	if m.selectedAddress == nil {
-		sb.WriteString(line(" Address required — use 'a' in Home to switch address."))
+		sb.WriteString(line(" context address_id=<required>"))
 	} else {
-		sb.WriteString(line(""))
+		sb.WriteString(line(" context address_id=" + boldStyle.Render(m.selectedAddress.ID)))
 	}
 	for i, choice := range foodHomeChoices {
 		label := foodHomeChoiceLabel(choice)
@@ -18,7 +18,6 @@ func (m foodModel) renderHome(sb *strings.Builder) {
 		}
 	}
 }
-
 
 func foodHomeChoiceLabel(choice foodHomeChoice) string {
 	if strings.TrimSpace(choice.icon) == "" {

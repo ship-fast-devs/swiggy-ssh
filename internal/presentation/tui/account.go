@@ -33,12 +33,13 @@ func (v AccountHomeView) Render(ctx context.Context, w io.Writer) error {
 
 	content := "\r\n" +
 		"  ┌────────────────────────────────────────┐\r\n" +
-		"  │       " + brandStyle.Render("swiggy.dev") + creamStyle.Render(" · Account") + "             │\r\n" +
+		"  │       " + brandStyle.Render("GET /account") + creamStyle.Render(" 200 OK") + "             │\r\n" +
 		"  └────────────────────────────────────────┘\r\n" +
 		"\r\n" +
-		"  " + brandStyle.Render("SSH key :") + " " + creamStyle.Render(v.SSHFingerprint) + "\r\n" +
-		"  " + brandStyle.Render("Provider:") + " " + creamStyle.Render("swiggy") + "\r\n" +
-		"  " + brandStyle.Render("Status  :") + " " + statusRendered + "\r\n"
+		"  " + mutedStyle.Render("response:") + "\r\n" +
+		"  " + brandStyle.Render("ssh_key :") + " " + creamStyle.Render(v.SSHFingerprint) + "\r\n" +
+		"  " + brandStyle.Render("provider:") + " " + creamStyle.Render("swiggy") + "\r\n" +
+		"  " + brandStyle.Render("status  :") + " " + statusRendered + "\r\n"
 	_, err := fmt.Fprint(w, centerInViewport(content, viewportFromContext(ctx)))
 	return err
 }

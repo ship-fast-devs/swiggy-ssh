@@ -87,10 +87,10 @@ type foodHomeChoice struct {
 }
 
 var foodHomeChoices = []foodHomeChoice{
-	{icon: "⌕", label: "search restaurants", action: "search"},
-	{icon: "⌕", label: "search dish", action: "dish"},
-	{icon: "▦", label: "staged cart", action: "cart"},
-	{icon: "✓", label: "order history", action: "orders"},
+	{icon: "GET", label: "/food/restaurants/search", action: "search"},
+	{icon: "GET", label: "/food/dishes/search", action: "dish"},
+	{icon: "GET", label: "/food/cart", action: "cart"},
+	{icon: "GET", label: "/food/orders", action: "orders"},
 }
 
 type foodModel struct {
@@ -331,7 +331,7 @@ func (m foodModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cartScroll = 0
 		m.status = msg.action + " in " + formatElapsed(msg.elapsed)
 		if msg.refreshErr != nil {
-			m.err = foodDisplayErr("Cart staged, but payment refresh failed", msg.refreshErr)
+			m.err = foodDisplayErr("Cart updated, but payment refresh failed", msg.refreshErr)
 		} else {
 			m.err = ""
 		}
@@ -373,7 +373,7 @@ func (m foodModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.activeOnly {
 			m.status = "loaded active orders in " + formatElapsed(msg.elapsed)
 		} else {
-			m.status = "loaded order history in " + formatElapsed(msg.elapsed)
+			m.status = "GET /food/orders 200 OK in " + formatElapsed(msg.elapsed)
 		}
 		return foodClearOnScreenChange(previousScreen, m, nil)
 
@@ -385,7 +385,7 @@ func (m foodModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.tracking = msg.status
 		m.screen = foodScreenTracking
-		m.status = "tailed in " + formatElapsed(msg.elapsed)
+		m.status = "GET /food/orders/{order_id}/track 200 OK in " + formatElapsed(msg.elapsed)
 		return foodClearOnScreenChange(previousScreen, m, nil)
 
 	case foodSearchDebounceMsg:
@@ -559,14 +559,14 @@ func (m foodModel) runHomeAction(action string) (tea.Model, tea.Cmd) {
 			m.err = "Address required to view cart."
 			return m, nil
 		}
-		return m.loadCart("Loading staged cart...")
+		return m.loadCart("GET /food/cart...")
 	case "orders":
 		if !m.hasAddress() {
 			m.err = "Address required."
 			return m, nil
 		}
 		m.screen = foodScreenLoading
-		m.loading = "Loading order history..."
+		m.loading = "GET /food/orders..."
 		return m, m.loadOrdersCmd(false)
 	}
 	return m, nil
@@ -639,7 +639,7 @@ func (m foodModel) handleSearchInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.screen = foodScreenLoading
-		m.loading = "searching restaurants..."
+		m.loading = "GET /food/restaurants/search..."
 		return m, m.searchRestaurantsCmd(query, false, m.searchPreviewVersion)
 	case "backspace", "ctrl+h":
 		if len(m.searchQuery) > 0 {
@@ -708,7 +708,7 @@ func (m foodModel) selectRestaurant(idx int) (tea.Model, tea.Cmd) {
 	}
 	m.selectedRestaurant = &m.restaurants[idx]
 	m.screen = foodScreenLoading
-	m.loading = "Loading menu..."
+	m.loading = "GET /food/restaurants/{restaurant_id}/menu..."
 	return m, m.loadMenuCmd(m.selectedRestaurant.ID)
 }
 
@@ -767,7 +767,7 @@ func (m foodModel) handleMenuSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.screen = foodScreenLoading
-		m.loading = "searching dishes..."
+		m.loading = "GET /food/dishes/search..."
 		return m, m.searchMenuCmd(query, false, m.searchPreviewVersion)
 	case "backspace", "ctrl+h":
 		if len(m.searchQuery) > 0 {
@@ -924,7 +924,7 @@ func (m foodModel) addItemToCart(item domainfood.MenuItemDetail, variants []doma
 	}
 	items := upsertFoodCartItem(m.intendedItems, updateItem)
 	m.screen = foodScreenLoading
-	m.loading = "Updating cart..."
+	m.loading = "POST /food/cart/items..."
 	return m, m.updateCartCmd(items)
 }
 
@@ -967,7 +967,7 @@ func (m foodModel) handleCartReviewKey(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.screen = foodScreenLoading
-		m.loading = "Loading coupons..."
+		m.loading = "GET /food/coupons..."
 		return m, m.loadCouponsCmd()
 	case "s", "/":
 		return m.startDishSearch(), nil
@@ -1013,7 +1013,7 @@ func (m foodModel) applyCoupon(idx int) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.screen = foodScreenLoading
-	m.loading = "Applying coupon..."
+	m.loading = "POST /food/cart/coupon..."
 	code := coupon.Code
 	return m, func() tea.Msg {
 		started := time.Now()
@@ -1033,7 +1033,7 @@ func (m foodModel) handleCheckoutConfirmKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "y":
 		m.screen = foodScreenLoading
-		m.loading = "Placing order..."
+		m.loading = "POST /food/checkout..."
 		return m, m.checkoutCmd()
 	case "n", "b", "esc":
 		m.screen = foodScreenCartReview
@@ -1064,7 +1064,7 @@ func (m foodModel) handleOrdersKey(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.screen = foodScreenLoading
-		m.loading = "Tracking order..."
+		m.loading = "GET /food/orders/{order_id}/track..."
 		return m, m.trackOrderCmd(order.OrderID)
 	case "b", "h":
 		m.screen = foodScreenHome
@@ -1163,7 +1163,7 @@ func (m foodModel) loadCartCmd() tea.Cmd {
 	return func() tea.Msg {
 		started := time.Now()
 		cart, err := m.service.GetCart(m.ctx, appfood.GetCartInput{AddressID: m.selectedAddressID(), RestaurantName: m.selectedRestaurantName()})
-		return foodCartMsg{cart: cart, err: err, action: "loaded staged cart", elapsed: time.Since(started)}
+		return foodCartMsg{cart: cart, err: err, action: "GET /food/cart 200 OK", elapsed: time.Since(started)}
 	}
 }
 
@@ -1179,13 +1179,13 @@ func (m foodModel) updateCartCmd(items []domainfood.FoodCartUpdateItem) tea.Cmd 
 			Items:          items,
 		})
 		if err != nil {
-			return foodCartMsg{err: err, action: "staged", elapsed: time.Since(started)}
+			return foodCartMsg{err: err, action: "POST /food/cart/items", elapsed: time.Since(started)}
 		}
 		cart, cartErr := m.service.GetCart(m.ctx, appfood.GetCartInput{AddressID: m.selectedAddressID(), RestaurantName: restaurantName})
 		if cartErr != nil {
-			return foodCartMsg{cart: updatedCart, refreshErr: cartErr, action: "staged", elapsed: time.Since(started)}
+			return foodCartMsg{cart: updatedCart, refreshErr: cartErr, action: "POST /food/cart/items 200 OK", elapsed: time.Since(started)}
 		}
-		return foodCartMsg{cart: cart, action: "staged", elapsed: time.Since(started)}
+		return foodCartMsg{cart: cart, action: "POST /food/cart/items 200 OK", elapsed: time.Since(started)}
 	}
 }
 

@@ -162,6 +162,24 @@ func (s *EnsureValidAccountUseCase) Execute(ctx context.Context, input EnsureVal
 	return EnsureValidAccountOutput{Account: account}, nil
 }
 
+func (s *EnsureValidAccountUseCase) RequireReconnect(ctx context.Context, sshIdentityID string) error {
+	if sshIdentityID == "" {
+		return ErrSSHIdentityRequired
+	}
+	account, err := s.repo.FindOAuthAccountBySSHIdentityAndProvider(ctx, sshIdentityID, MockProvider)
+	if err != nil {
+		return fmt.Errorf("find oauth account: %w", err)
+	}
+	if account.Status == OAuthAccountStatusRevoked {
+		return ErrAccountRevoked
+	}
+	account.Status = OAuthAccountStatusReconnectRequired
+	if _, err := s.repo.UpsertOAuthAccount(ctx, account); err != nil {
+		return fmt.Errorf("mark oauth account reconnect required: %w", err)
+	}
+	return nil
+}
+
 func (s *EnsureValidAccountUseCase) issueAuthRequired(ctx context.Context, input EnsureValidAccountInput) (EnsureValidAccountOutput, error) {
 	rawAttempt, _, err := input.AuthAttemptService.IssueAuthAttempt(ctx, input.SSHIdentityID, input.TerminalSessionID)
 	if err != nil {

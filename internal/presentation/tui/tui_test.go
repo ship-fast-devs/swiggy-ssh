@@ -68,7 +68,7 @@ func TestHomeViewRendersSelectedAddressReadiness(t *testing.T) {
 	if err := v.Render(ctx, &buf); err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	if !strings.Contains(buf.String(), "deploying to") || !strings.Contains(buf.String(), "Home") {
+	if !strings.Contains(buf.String(), "delivering to") || !strings.Contains(buf.String(), "Home") {
 		t.Fatalf("expected selected address readiness, got %q", buf.String())
 	}
 }
@@ -115,12 +115,12 @@ func TestHomeViewRendersMenuItemsAfterContinue(t *testing.T) {
 	}
 	out := buf.String()
 
-	for _, want := range []string{"Instamart", "Food", "swiggy.ai", "coming soon", "j/k move"} {
+	for _, want := range []string{"swiggy.dev API console", "GET  /instamart", "GET  /food", "POST  /ai/assistant", "coming soon", "j/k move"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in HomeView menu output", want)
 		}
 	}
-	for _, removed := range []string{"Reorder usuals", "Account", "press enter to continue"} {
+	for _, removed := range []string{"Reorder usuals", "Account", "Tail active order", "press enter to continue"} {
 		if strings.Contains(out, removed) {
 			t.Fatalf("did not expect %q in menu output", removed)
 		}
@@ -186,10 +186,11 @@ func TestLoginWaitingViewRendersDirectURL(t *testing.T) {
 	out := buf.String()
 
 	for _, want := range []string{
+		"POST /auth/browser-attempt 201 Created",
 		"http://localhost:8080/auth/start?attempt=opaque",
 		"one-time link",
-		"Waiting for browser login",
-		"not connected",
+		"Waiting for callback",
+		"pending",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in LoginWaitingView output", want)
@@ -277,10 +278,12 @@ func TestLoginSuccessViewShowsSignedInAs(t *testing.T) {
 	out := buf.String()
 
 	for _, want := range []string{
-		"✓ Swiggy account connected",
+		"GET /auth/session 200 OK",
 		"Alice",
 		"alice@example.com",
-		"Instamart",
+		"tokens:",
+		"encrypted",
+		"Continue to Instamart",
 		"enter continue",
 	} {
 		if !strings.Contains(out, want) {
@@ -315,7 +318,7 @@ func TestLoginSuccessViewFirstAuth(t *testing.T) {
 	v := tui.LoginSuccessView{IsFirstAuth: true, DisplayName: "Sujith", Email: "sujith@example.com"}
 	var buf bytes.Buffer
 	_ = v.Render(ctx, &buf)
-	if !strings.Contains(buf.String(), "✓ Swiggy account connected") {
+	if !strings.Contains(buf.String(), "GET /auth/session 200 OK") {
 		t.Fatal("expected connected message in first-auth LoginSuccessView")
 	}
 }
@@ -326,7 +329,7 @@ func TestLoginSuccessViewWasReauth(t *testing.T) {
 	v := tui.LoginSuccessView{WasReauth: true, DisplayName: "Sujith", Email: "sujith@example.com"}
 	var buf bytes.Buffer
 	_ = v.Render(ctx, &buf)
-	if !strings.Contains(buf.String(), "✓ Swiggy account connected") {
+	if !strings.Contains(buf.String(), "GET /auth/session 200 OK") {
 		t.Fatal("expected connected message in reauth LoginSuccessView")
 	}
 }
@@ -337,7 +340,7 @@ func TestLoginSuccessViewWelcomeBack(t *testing.T) {
 	v := tui.LoginSuccessView{DisplayName: "Sujith", Email: "sujith@example.com"}
 	var buf bytes.Buffer
 	_ = v.Render(ctx, &buf)
-	if !strings.Contains(buf.String(), "✓ Swiggy account connected") {
+	if !strings.Contains(buf.String(), "GET /auth/session 200 OK") {
 		t.Fatal("expected connected message in LoginSuccessView")
 	}
 }
@@ -361,8 +364,8 @@ func TestInstamartViewRendersAddress(t *testing.T) {
 	for _, want := range []string{
 		"Work",
 		"cart=3",
-		"grep products",
-		"/ grep",
+		"grep groceries",
+		"/ search",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in InstamartView output", want)
@@ -382,7 +385,7 @@ func TestInstamartPlaceholderViewDelegates(t *testing.T) {
 
 	for _, want := range []string{
 		"env=instamart",
-		"grep products",
+		"grep groceries",
 		"Home", // default address label
 		"Guest session connected",
 	} {
@@ -411,6 +414,9 @@ func TestAccountHomeViewShowsFingerprint(t *testing.T) {
 	if !strings.Contains(out, "SHA256:abcdef") {
 		t.Fatal("expected fingerprint in output")
 	}
+	if !strings.Contains(out, "GET /account") || !strings.Contains(out, "200 OK") {
+		t.Fatal("expected account API status in output")
+	}
 	if !strings.Contains(out, "active") {
 		t.Fatal("expected active status in output")
 	}
@@ -426,7 +432,7 @@ func TestRevokedViewRenders(t *testing.T) {
 	v := tui.RevokedView{}
 	var buf bytes.Buffer
 	_ = v.Render(context.Background(), &buf)
-	if !strings.Contains(buf.String(), "revoked") {
+	if !strings.Contains(buf.String(), "GET /account 403 Forbidden") || !strings.Contains(buf.String(), "account_revoked") {
 		t.Fatal("expected revoked message")
 	}
 }

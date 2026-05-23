@@ -10,14 +10,15 @@ import (
 const restaurantListRows = 10
 
 func (m foodModel) renderRestaurantSearch(sb *strings.Builder) {
-	sb.WriteString(line(brandStyle.Render(" search restaurants")))
+	sb.WriteString(line(brandStyle.Render(" GET /food/restaurants/search?query=$query" + m.restaurantSearchAPIStatus())))
 	sb.WriteString(line(""))
-	sb.WriteString(line(" query: " + boldStyle.Render(m.searchQuery) + cursorStyle.Render("_")))
+	sb.WriteString(line(" params.query: " + boldStyle.Render(m.searchQuery) + cursorStyle.Render("_")))
+	sb.WriteString(line(" params.address_id: " + boldStyle.Render(m.selectedAddressID())))
 
 	if m.searchPreviewLoading {
 		frame := foodSearchSpinnerFrames[m.searchPreviewSpinner%len(foodSearchSpinnerFrames)]
 		sb.WriteString(line(""))
-		sb.WriteString(line(" " + frame + " searching restaurants..."))
+		sb.WriteString(line(" " + frame + " request in flight..."))
 		return
 	}
 	if m.searchPreviewErr != "" {
@@ -30,7 +31,7 @@ func (m foodModel) renderRestaurantSearch(sb *strings.Builder) {
 	}
 
 	sb.WriteString(line(""))
-	sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" preview · enter opens results · %d matches in %s", len(m.searchPreviewRestaurants), formatElapsed(m.searchPreviewElapsed)))))
+	sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" response preview · enter opens response.restaurants · %d matches in %s", len(m.searchPreviewRestaurants), formatElapsed(m.searchPreviewElapsed)))))
 	if len(m.searchPreviewRestaurants) == 0 {
 		sb.WriteString(line(" No matching restaurants found yet."))
 		return
@@ -39,6 +40,19 @@ func (m foodModel) renderRestaurantSearch(sb *strings.Builder) {
 	if len(m.searchPreviewRestaurants) > 4 {
 		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" ...and %d more", len(m.searchPreviewRestaurants)-4))))
 	}
+}
+
+func (m foodModel) restaurantSearchAPIStatus() string {
+	if m.searchPreviewLoading {
+		return mutedStyle.Render("  calling...")
+	}
+	if m.searchPreviewErr != "" {
+		return errorStyle.Render("  error")
+	}
+	if m.searchPreviewLoaded && m.searchPreviewQuery == m.searchQuery {
+		return mutedStyle.Render("  200 OK · " + formatElapsed(m.searchPreviewElapsed))
+	}
+	return ""
 }
 
 func renderPreviewRestaurantTable(sb *strings.Builder, restaurants []domainfood.Restaurant, limit int) {
@@ -73,7 +87,8 @@ func restaurantPreviewRow(r domainfood.Restaurant) string {
 }
 
 func (m foodModel) renderRestaurantList(sb *strings.Builder) {
-	sb.WriteString(line(brandStyle.Render(" restaurant results")))
+	sb.WriteString(line(brandStyle.Render(" GET /food/restaurants/search?... 200 OK")))
+	sb.WriteString(line(mutedStyle.Render(" response.restaurants")))
 	if len(m.restaurants) > restaurantListRows {
 		start := restaurantWindowStart(m.cursor, len(m.restaurants), restaurantListRows)
 		end := start + restaurantListRows
@@ -140,17 +155,18 @@ func (m foodModel) renderItemDetail(sb *strings.Builder) {
 		return
 	}
 	item := m.selectedItem
-	sb.WriteString(line(brandStyle.Render(" item detail")))
+	sb.WriteString(line(brandStyle.Render(" POST /food/cart/items draft")))
+	sb.WriteString(line(mutedStyle.Render(" body restaurant_id=" + m.selectedRestaurantID() + " item_id=" + item.ID)))
 	vegIcon := "🔴"
 	if item.IsVeg {
 		vegIcon = "🟢"
 	}
 	sb.WriteString(line(" " + vegIcon + " " + boldStyle.Render(item.Name)))
 	if item.Price > 0 {
-		sb.WriteString(line(" price: Rs " + fmt.Sprintf("%d", item.Price)))
+		sb.WriteString(line(" body.price: Rs " + fmt.Sprintf("%d", item.Price)))
 	}
 	if item.Rating != "" {
-		sb.WriteString(line(" rating: " + item.Rating + "★"))
+		sb.WriteString(line(" response.rating: " + item.Rating + "★"))
 	}
 	if item.Description != "" {
 		sb.WriteString(line(" " + mutedStyle.Render(truncateFoodTerminal(item.Description, 70))))
@@ -159,12 +175,12 @@ func (m foodModel) renderItemDetail(sb *strings.Builder) {
 	groups := allVariantGroups(*item)
 	if len(groups) == 0 {
 		sb.WriteString(line(""))
-		sb.WriteString(line(" No variants — press enter to add to cart."))
+		sb.WriteString(line(" body.quantity: 1 · body.variants: [] · enter sends request"))
 		return
 	}
 
 	sb.WriteString(line(""))
-	sb.WriteString(line(mutedStyle.Render(" choose variants · tab switches group · j/k moves · enter adds to cart")))
+	sb.WriteString(line(mutedStyle.Render(" body.variants · tab group · j/k choose · enter sends request")))
 	for gi, group := range groups {
 		isActiveGroup := gi == (m.cursor % len(groups))
 		groupLabel := group.Name

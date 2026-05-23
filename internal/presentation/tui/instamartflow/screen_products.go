@@ -2,23 +2,31 @@ package instamartflow
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
 
 const productListRows = 9
+const quantityModalInnerWidth = 36
+const quantityModalTopPadding = 4
 
 func (m instamartModel) renderSearch(sb *strings.Builder) {
-	sb.WriteString(line(brandStyle.Render(" grep products")))
+	sb.WriteString(line(brandStyle.Render(" grep groceries")))
 	sb.WriteString(line(""))
-	sb.WriteString(line(" query: " + boldStyle.Render(m.searchQuery) + cursorStyle.Render("_")))
+	sb.WriteString(line(" query" + m.searchAPIStatus()))
+	sb.WriteString(line(" pattern: " + boldStyle.Render(m.searchQuery) + cursorStyle.Render("_")))
+	sb.WriteString(line(" address_id: " + m.selectedAddressID()))
 
+	if m.searchPreviewDebouncing {
+		sb.WriteString(line(""))
+		sb.WriteString(line(" debounce: indexing pantry..."))
+		return
+	}
 	if m.searchPreviewLoading {
 		frame := searchSpinnerFrames[m.searchPreviewSpinner%len(searchSpinnerFrames)]
 		sb.WriteString(line(""))
-		sb.WriteString(line(" " + frame + " scanning index..."))
+		sb.WriteString(line(" " + frame + " grep groceries --live..."))
 		return
 	}
 	if m.searchPreviewErr != "" {
@@ -31,32 +39,57 @@ func (m instamartModel) renderSearch(sb *strings.Builder) {
 	}
 
 	sb.WriteString(line(""))
-	sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" preview · enter opens results · %d matches in %s", len(m.searchPreviewRows), formatElapsed(m.searchPreviewElapsed)))))
+	sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" live preview · up/down selects · enter edits quantity · %d matches", len(m.searchPreviewRows)))))
 	if len(m.searchPreviewRows) == 0 {
 		sb.WriteString(line(" No matching products found yet."))
 		return
 	}
-	renderPreviewProductTable(sb, m.searchPreviewRows, 5)
+	renderPreviewProductTable(sb, m.searchPreviewRows, m.cursor, 5)
 	if len(m.searchPreviewRows) > 5 {
-		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" ...and %d more", len(m.searchPreviewRows)-5))))
+		start := productWindowStart(m.cursor, len(m.searchPreviewRows), 5)
+		end := start + 5
+		if end > len(m.searchPreviewRows) {
+			end = len(m.searchPreviewRows)
+		}
+		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" showing %d-%d of %d", start+1, end, len(m.searchPreviewRows)))))
 	}
 }
 
-func renderPreviewProductTable(sb *strings.Builder, rows []productVariationRow, limit int) {
-	sb.WriteString(line("   type item                         pack      price"))
-	for i, row := range rows {
-		if limit > 0 && i >= limit {
-			break
-		}
-		label := productPreviewRow(row)
+func (m instamartModel) searchAPIStatus() string {
+	if m.searchPreviewLoading {
+		return mutedStyle.Render("  calling...")
+	}
+	if m.searchPreviewErr != "" {
+		return errorStyle.Render("  error")
+	}
+	if m.searchPreviewLoaded && m.searchPreviewQuery == m.searchQuery {
+		return mutedStyle.Render("  200 OK · " + formatElapsed(m.searchPreviewElapsed))
+	}
+	return ""
+}
+
+func renderPreviewProductTable(sb *strings.Builder, rows []productVariationRow, cursor, limit int) {
+	sb.WriteString(line("   # item                         pack      price"))
+	start := productWindowStart(cursor, len(rows), limit)
+	end := len(rows)
+	if limit > 0 && start+limit < end {
+		end = start + limit
+	}
+	for i := start; i < end; i++ {
+		row := rows[i]
+		label := productPreviewRow(i, row)
 		if !productRowAvailable(row) {
 			label = mutedStyle.Render(label)
 		}
-		sb.WriteString(line("   " + label))
+		if i == cursor {
+			sb.WriteString(line(cursorStyle.Render("> ") + boldStyle.Render(label)))
+		} else {
+			sb.WriteString(line("   " + label))
+		}
 	}
 }
 
-func productPreviewRow(row productVariationRow) string {
+func productPreviewRow(index int, row productVariationRow) string {
 	name := defaultString(row.Variation.DisplayName, row.Product.DisplayName)
 	if row.Product.Promoted {
 		name = "[ad] " + name
@@ -66,13 +99,13 @@ func productPreviewRow(row productVariationRow) string {
 	if !productRowAvailable(row) {
 		price = "[x] unavailable"
 	}
-	return fmt.Sprintf("%-4s %-28s %-9s %s", productRowIcon(row), truncateTerminal(name, 28), truncateTerminal(pack, 9), price)
+	return fmt.Sprintf("%d  %-28s %-9s %s", index+1, truncateTerminal(name, 28), truncateTerminal(pack, 9), price)
 }
 
 func (m instamartModel) renderProducts(sb *strings.Builder) {
-	title := "grep results"
+	title := "GET /instamart/search?query=" + m.searchQuery + " 200 OK"
 	if strings.TrimSpace(m.searchQuery) == "" {
-		title = "recent cache"
+		title = "git add from recent cache"
 	}
 	sb.WriteString(line(brandStyle.Render(" " + title)))
 	if len(m.rows) > productListRows {
@@ -81,15 +114,15 @@ func (m instamartModel) renderProducts(sb *strings.Builder) {
 		if end > len(m.rows) {
 			end = len(m.rows)
 		}
-		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" choose exact pack · showing %d-%d of %d", start+1, end, len(m.rows)))))
+		sb.WriteString(line(mutedStyle.Render(fmt.Sprintf(" 1-9/enter opens quantity · +/- opens adjusted quantity · showing %d-%d of %d", start+1, end, len(m.rows)))))
 	} else {
-		sb.WriteString(line(mutedStyle.Render(" choose exact pack")))
+		sb.WriteString(line(mutedStyle.Render(" 1-9/enter opens quantity · +/- opens adjusted quantity")))
 	}
 	renderProductTable(sb, m.rows, m.cursor, productListRows)
 }
 
 func renderProductTable(sb *strings.Builder, rows []productVariationRow, cursor, limit int) {
-	sb.WriteString(line("   type item                         pack      price"))
+	sb.WriteString(line("   # item                         pack      price"))
 	start := productWindowStart(cursor, len(rows), limit)
 	end := len(rows)
 	if limit > 0 && start+limit < end {
@@ -109,7 +142,7 @@ func renderProductTable(sb *strings.Builder, rows []productVariationRow, cursor,
 	}
 }
 
-func productTableRow(_ int, row productVariationRow) string {
+func productTableRow(index int, row productVariationRow) string {
 	name := defaultString(row.Variation.DisplayName, row.Product.DisplayName)
 	if row.Product.Promoted {
 		name = "[ad] " + name
@@ -119,7 +152,7 @@ func productTableRow(_ int, row productVariationRow) string {
 	if !productRowAvailable(row) {
 		price = "[x] unavailable"
 	}
-	return fmt.Sprintf("%-4s %-28s %-9s %s", productRowIcon(row), truncateTerminal(name, 28), truncateTerminal(pack, 9), price)
+	return fmt.Sprintf("%d  %-28s %-9s %s", index+1, truncateTerminal(name, 28), truncateTerminal(pack, 9), price)
 }
 
 func productRowIcon(row productVariationRow) string {
@@ -149,29 +182,68 @@ func productWindowStart(cursor, total, limit int) int {
 }
 
 func (m instamartModel) renderQuantity(sb *strings.Builder) {
-	if m.selectedRow == nil {
-		sb.WriteString(line(" No variation selected."))
-		return
+	for i := 0; i < quantityModalTopPadding; i++ {
+		sb.WriteString(line(""))
 	}
-	sb.WriteString(line(brandStyle.Render(" stage item")))
+	for _, modalLine := range strings.Split(strings.TrimSuffix(m.renderQuantityModal(), "\r\n"), "\r\n") {
+		renderQuantityModalLine(sb, modalLine)
+	}
+}
+
+func (m instamartModel) renderQuantityModal() string {
+	if m.selectedRow == nil {
+		return "┌─ " + brandStyle.Render("Add to cart") + " " + strings.Repeat("─", 24) + "┐\r\n" +
+			quantityModalBody("No variation selected.") + "\r\n" +
+			"└" + strings.Repeat("─", quantityModalInnerWidth+2) + "┘\r\n"
+	}
+	row := *m.selectedRow
+	name := truncateTerminal(defaultString(row.Variation.DisplayName, row.Product.DisplayName), quantityModalInnerWidth)
+	pack := truncateTerminal(defaultString(row.Variation.QuantityDescription, "-"), 17)
+	price := fmt.Sprintf("₹%d", row.Variation.Price.OfferPrice)
 	status := "available"
 	statusStyle := successStyle
-	if !productRowAvailable(*m.selectedRow) {
+	if !productRowAvailable(row) {
 		status = "unavailable"
 		statusStyle = errorStyle
 	}
-	sb.WriteString(yamlLine("item", defaultString(m.selectedRow.Variation.DisplayName, m.selectedRow.Product.DisplayName), yamlValStyle))
-	sb.WriteString(yamlLine("pack", defaultString(m.selectedRow.Variation.QuantityDescription, "-"), yamlValStyle))
-	sb.WriteString(yamlLine("price", fmt.Sprintf("Rs %d", m.selectedRow.Variation.Price.OfferPrice), yamlValStyle))
-	sb.WriteString(yamlLine("status", status, statusStyle))
-	sb.WriteString(yamlLine("quantity", strconv.Itoa(m.quantity), successStyle))
-	sb.WriteString(line(""))
-	sb.WriteString(line(" Press enter to update the whole intended cart."))
-	sb.WriteString(line(" Set quantity to 0 to remove this variation."))
+	action := "enter add/update   esc cancel"
+	if m.quantity == 0 {
+		action = "enter remove       esc cancel"
+	}
+
+	var sb strings.Builder
+	sb.WriteString("┌─ " + brandStyle.Render("Add to cart") + " " + strings.Repeat("─", 24) + "┐\r\n")
+	sb.WriteString(quantityModalBody(name) + "\r\n")
+	sb.WriteString(quantityModalBody(fmt.Sprintf("Pack: %-17s %9s", pack, price)) + "\r\n")
+	sb.WriteString(quantityModalBody("Status: "+statusStyle.Render(status)) + "\r\n")
+	sb.WriteString(quantityModalBody("") + "\r\n")
+	sb.WriteString(quantityModalBody(fmt.Sprintf("Quantity:        [-]  %d  [+]", m.quantity)) + "\r\n")
+	if m.quantity == 0 {
+		sb.WriteString(quantityModalBody(mutedStyle.Render("0 means remove this item")) + "\r\n")
+	} else {
+		sb.WriteString(quantityModalBody("") + "\r\n")
+	}
+	sb.WriteString(quantityModalBody(mutedStyle.Render(action)) + "\r\n")
+	sb.WriteString("└" + strings.Repeat("─", quantityModalInnerWidth+2) + "┘\r\n")
+	return sb.String()
 }
 
-func yamlLine(key, value string, valueStyle lipgloss.Style) string {
-	return line(" " + yamlKeyStyle.Render(key+":") + " " + valueStyle.Render(value))
+func quantityModalBody(content string) string {
+	w := lipgloss.Width(content)
+	if w > quantityModalInnerWidth {
+		runes := []rune(content)
+		content = string(runes[:quantityModalInnerWidth])
+		w = quantityModalInnerWidth
+	}
+	return "│ " + content + strings.Repeat(" ", quantityModalInnerWidth-w) + " │"
+}
+
+func renderQuantityModalLine(sb *strings.Builder, content string) {
+	pad := (innerWidth - lipgloss.Width(content)) / 2
+	if pad < 0 {
+		pad = 0
+	}
+	sb.WriteString(line(strings.Repeat(" ", pad) + content))
 }
 
 func productRowAvailable(row productVariationRow) bool {

@@ -436,7 +436,11 @@ func (s *SSHServer) runSession(ctx context.Context, ch ssh.Channel, fallbackMsg,
 		})
 		if fastErr == nil {
 			state.authenticated = true
-			s.loadSessionAddresses(ctx, resolvedSSHIdentityID, &state)
+			if err := s.loadSessionAddresses(ctx, resolvedSSHIdentityID, &state); errors.Is(err, domaininstamart.ErrProviderUnauthorized) {
+				if !s.recoverAddressAuthAndReload(ctx, ch, render, terminalSessionID, fingerprint, publicKeyAuthorized, &resolvedSSHIdentityID, &state) {
+					return
+				}
+			}
 		}
 		if errors.Is(fastErr, auth.ErrAccountRevoked) {
 			render(ctx, tui.RevokedView{})
@@ -470,10 +474,15 @@ func (s *SSHServer) runSession(ctx context.Context, ch ssh.Channel, fallbackMsg,
 					return
 				}
 				state.authenticated = true
-				s.loadSessionAddresses(ctx, resolvedSSHIdentityID, &state)
+				if err := s.loadSessionAddresses(ctx, resolvedSSHIdentityID, &state); errors.Is(err, domaininstamart.ErrProviderUnauthorized) {
+					if !s.recoverAddressAuthAndReload(ctx, ch, render, terminalSessionID, fingerprint, publicKeyAuthorized, &resolvedSSHIdentityID, &state) {
+						return
+					}
+				}
 			}
 			selectedAddress, ok := state.selectedAddress()
 			if !ok {
+				showAddressPicker = true
 				continue
 			}
 			_ = tui.ClearScreen(ch)
@@ -495,7 +504,11 @@ func (s *SSHServer) runSession(ctx context.Context, ch ssh.Channel, fallbackMsg,
 					return
 				}
 				state.authenticated = true
-				s.loadSessionAddresses(ctx, resolvedSSHIdentityID, &state)
+				if err := s.loadSessionAddresses(ctx, resolvedSSHIdentityID, &state); errors.Is(err, domaininstamart.ErrProviderUnauthorized) {
+					if !s.recoverAddressAuthAndReload(ctx, ch, render, terminalSessionID, fingerprint, publicKeyAuthorized, &resolvedSSHIdentityID, &state) {
+						return
+					}
+				}
 			}
 			selectedAddress, _ := state.selectedAddress()
 			_ = tui.ClearScreen(ch)
@@ -517,7 +530,11 @@ func (s *SSHServer) runSession(ctx context.Context, ch ssh.Channel, fallbackMsg,
 					return
 				}
 				state.authenticated = true
-				s.loadSessionAddresses(ctx, resolvedSSHIdentityID, &state)
+				if err := s.loadSessionAddresses(ctx, resolvedSSHIdentityID, &state); errors.Is(err, domaininstamart.ErrProviderUnauthorized) {
+					if !s.recoverAddressAuthAndReload(ctx, ch, render, terminalSessionID, fingerprint, publicKeyAuthorized, &resolvedSSHIdentityID, &state) {
+						return
+					}
+				}
 			}
 			selectedAddress, ok := state.selectedAddress()
 			if !ok {
@@ -649,13 +666,41 @@ func (s *SSHServer) authenticateSessionForApp(ctx context.Context, ch ssh.Channe
 	return false, resolvedSSHIdentityID
 }
 
-func (s *SSHServer) loadSessionAddresses(ctx context.Context, sshIdentityID string, state *sessionAddressState) {
+func (s *SSHServer) recoverAddressAuthAndReload(ctx context.Context, ch ssh.Channel, render func(context.Context, tui.View), terminalSessionID, fingerprint, publicKeyAuthorized string, resolvedSSHIdentityID *string, state *sessionAddressState) bool {
+	if s.authUseCase == nil || resolvedSSHIdentityID == nil || *resolvedSSHIdentityID == "" {
+		render(ctx, tui.ErrorView{Message: "Swiggy needs reconnect. Please reconnect and try again."})
+		return false
+	}
+	if err := s.authUseCase.RequireReconnect(ctx, *resolvedSSHIdentityID); err != nil {
+		s.logger.WarnContext(ctx, "mark account reconnect required failed", "error", err)
+		if errors.Is(err, auth.ErrAccountRevoked) {
+			render(ctx, tui.RevokedView{})
+			return false
+		}
+		render(ctx, tui.ErrorView{Message: "Swiggy reconnect failed. Please try again."})
+		return false
+	}
+	ok, refreshedSSHIdentityID := s.authenticateSessionForApp(ctx, ch, render, terminalSessionID, fingerprint, publicKeyAuthorized, *resolvedSSHIdentityID)
+	if !ok {
+		return false
+	}
+	*resolvedSSHIdentityID = refreshedSSHIdentityID
+	state.authenticated = true
+	if err := s.loadSessionAddresses(ctx, refreshedSSHIdentityID, state); err != nil {
+		s.logger.WarnContext(ctx, "session address reload after reconnect failed", "error", err)
+		render(ctx, tui.ErrorView{Message: "Swiggy address reload failed after reconnect. Please try again."})
+		return false
+	}
+	return true
+}
+
+func (s *SSHServer) loadSessionAddresses(ctx context.Context, sshIdentityID string, state *sessionAddressState) error {
 	if state == nil || !state.authenticated {
-		return
+		return nil
 	}
 	if s.instamartSvc == nil || sshIdentityID == "" {
 		state.addressStatus = tui.HomeAddressUnavailable
-		return
+		return nil
 	}
 	addresses, err := s.instamartSvc.GetAddresses(domainauth.ContextWithUserID(ctx, sshIdentityID))
 	if err != nil {
@@ -663,18 +708,19 @@ func (s *SSHServer) loadSessionAddresses(ctx context.Context, sshIdentityID stri
 		state.addresses = nil
 		state.selectedIndex = -1
 		state.addressStatus = tui.HomeAddressUnavailable
-		return
+		return err
 	}
 	state.addresses = addresses
 	if len(addresses) == 0 {
 		state.selectedIndex = -1
 		state.addressStatus = tui.HomeAddressRequired
-		return
+		return nil
 	}
 	if state.selectedIndex < 0 || state.selectedIndex >= len(addresses) {
 		state.selectedIndex = 0
 	}
 	state.addressStatus = tui.HomeAddressSelected
+	return nil
 }
 
 func (s sessionAddressState) homeSessionState() tui.HomeSessionState {

@@ -8,7 +8,8 @@ import (
 )
 
 func (m foodModel) renderOrders(sb *strings.Builder) {
-	sb.WriteString(line(brandStyle.Render(" order history")))
+	sb.WriteString(line(brandStyle.Render(" GET /food/orders 200 OK")))
+	sb.WriteString(line(mutedStyle.Render(" response.orders")))
 	if len(m.orders.Orders) == 0 {
 		sb.WriteString(line(" No orders found."))
 		return
@@ -35,7 +36,7 @@ func (m foodModel) renderOrders(sb *strings.Builder) {
 		order := m.orders.Orders[m.cursor]
 		if !order.Active {
 			sb.WriteString(line(""))
-			sb.WriteString(line(mutedStyle.Render(" Tracking is only available for active orders.")))
+			sb.WriteString(line(mutedStyle.Render(" GET /food/orders/{order_id}/track is available for active orders only.")))
 		}
 	}
 }
@@ -48,7 +49,7 @@ func foodOrderIcon(order domainfood.FoodOrderSummary) string {
 }
 
 func (m foodModel) renderTracking(sb *strings.Builder) {
-	sb.WriteString(line(brandStyle.Render(" tail active order")))
+	sb.WriteString(line(brandStyle.Render(" GET /food/orders/{order_id}/track 200 OK")))
 	if m.tracking.StatusMessage == "" {
 		sb.WriteString(line(" Tracking is unavailable for this order. Please check the Swiggy app."))
 		return
@@ -64,9 +65,8 @@ func (m foodModel) renderTracking(sb *strings.Builder) {
 	}
 	if m.tracking.OrderID != "" {
 		sb.WriteString(line(""))
-		sb.WriteString(line(mutedStyle.Render(" order_id=" + m.tracking.OrderID)))
+		sb.WriteString(line(mutedStyle.Render(" params.order_id=" + m.tracking.OrderID)))
 	}
 	sb.WriteString(line(""))
 	sb.WriteString(line(mutedStyle.Render(" To cancel: call Swiggy customer care at 080-67466729")))
-	_ = strings.TrimSpace // used in other files
 }

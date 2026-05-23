@@ -27,7 +27,7 @@ func (v LoginWaitingView) Render(ctx context.Context, w io.Writer) error {
 		}, w, v.In)
 		return err
 	}
-	return runStatic(w, loginWaitingContent(viewportFromContext(ctx), v.LoginURL, "not connected", false, false))
+	return runStatic(w, loginWaitingContent(viewportFromContext(ctx), v.LoginURL, "pending", false, false))
 }
 
 type loginWaitingModel struct {
@@ -56,9 +56,9 @@ func (m loginWaitingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m loginWaitingModel) View() string {
-	status := "not connected"
+	status := "pending"
 	if m.copied {
-		status = "copy attempted"
+		status = "pending"
 	}
 	return loginWaitingContent(m.viewport, m.loginURL, status, true, m.copied)
 }
@@ -69,24 +69,29 @@ func loginWaitingContent(viewport Viewport, loginURL, status string, interactive
 		sb.WriteString(osc52(loginURL))
 	}
 	sb.WriteString(top())
-	sb.WriteString(line(" " + brandStyle.Render("swiggy.ssh") + creamStyle.Render(" > Login")))
+	sb.WriteString(line(" " + brandStyle.Render("swiggy.dev") + creamStyle.Render(" > auth")))
 	sb.WriteString(divider())
 	sb.WriteString(line(""))
-	sb.WriteString(line(" " + creamStyle.Render("You need to connect your Swiggy account before placing orders.")))
+	sb.WriteString(line(" " + brandStyle.Render("POST /auth/browser-attempt 201 Created")))
+	sb.WriteString(line(" " + mutedStyle.Render("response:")))
+	sb.WriteString(line("   login_url: " + accentStyle.Render(osc8("Open Swiggy login", loginURL))))
+	sb.WriteString(line("   expires: " + mutedStyle.Render("short_lived")))
+	sb.WriteString(line("   status: " + mutedStyle.Render(status)))
 	sb.WriteString(line(""))
-	sb.WriteString(line(" " + brandStyle.Render("Open this URL in your browser:")))
-	sb.WriteString(line(""))
-	sb.WriteString(line(" " + accentStyle.Render(osc8("Open Swiggy login", loginURL))))
+	sb.WriteString(line(" " + brandStyle.Render("Open login_url in your browser:")))
 	sb.WriteString(line(""))
 	for _, wrapped := range wrapText(loginURL, 70) {
 		sb.WriteString(line(" " + accentStyle.Render(wrapped)))
 	}
 	sb.WriteString(line(""))
-	sb.WriteString(line(" " + creamStyle.Render("This one-time link securely connects your browser login to this SSH session.")))
+	sb.WriteString(line(" " + creamStyle.Render("This one-time link securely connects browser auth to this SSH session.")))
 	sb.WriteString(line(""))
-	sb.WriteString(line(" " + creamStyle.Render("Waiting for browser login...")))
+	sb.WriteString(line(" " + creamStyle.Render("Waiting for callback...")))
 	sb.WriteString(line(""))
-	sb.WriteString(line(" " + brandStyle.Render("Status:") + " " + mutedStyle.Render(status)))
+	sb.WriteString(line(" " + brandStyle.Render("poll:") + " " + mutedStyle.Render("GET /auth/session -> pending")))
+	if copied {
+		sb.WriteString(line(" " + brandStyle.Render("clipboard:") + " " + mutedStyle.Render("copy attempted")))
+	}
 	sb.WriteString(line(""))
 	sb.WriteString(divider())
 	if interactive {
@@ -153,20 +158,23 @@ func (m loginSuccessModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m loginSuccessModel) View() string {
 	var sb strings.Builder
 	sb.WriteString(top())
-	sb.WriteString(headerLine(" "+brandStyle.Render("swiggy.ssh")+creamStyle.Render(" > Login"), mutedStyle.Render("secure browser login")+" "))
+	sb.WriteString(headerLine(" "+brandStyle.Render("swiggy.dev")+creamStyle.Render(" > auth/session"), mutedStyle.Render("secure browser login")+" "))
 	sb.WriteString(divider())
 	sb.WriteString(line(""))
-	sb.WriteString(centeredLine(successStyle.Render("✓ Swiggy account connected")))
+	sb.WriteString(centeredLine(successStyle.Render("GET /auth/session 200 OK")))
 	sb.WriteString(centeredLine(creamStyle.Render(m.message)))
 	sb.WriteString(line(""))
-	sb.WriteString(line("  " + mutedStyle.Render("┌─ Account ─────────────────────────────────────────────────────────────┐")))
-	sb.WriteString(line("  " + mutedStyle.Render("│") + " " + brandStyle.Render("Signed in") + "  " + boldStyle.Render(m.name)))
-	sb.WriteString(line("  " + mutedStyle.Render("│") + " " + brandStyle.Render("Email") + "      " + mutedStyle.Render(m.email)))
+	sb.WriteString(line("  " + mutedStyle.Render("┌─ response.account ────────────────────────────────────────────────────┐")))
+	sb.WriteString(line("  " + mutedStyle.Render("│") + " provider: " + brandStyle.Render("swiggy")))
+	sb.WriteString(line("  " + mutedStyle.Render("│") + " status:   " + successStyle.Render("active")))
+	sb.WriteString(line("  " + mutedStyle.Render("│") + " name:     " + boldStyle.Render(m.name)))
+	sb.WriteString(line("  " + mutedStyle.Render("│") + " email:    " + mutedStyle.Render(m.email)))
+	sb.WriteString(line("  " + mutedStyle.Render("│") + " tokens:   " + mutedStyle.Render("encrypted")))
 	sb.WriteString(line("  " + mutedStyle.Render("└──────────────────────────────────────────────────────────────────────┘")))
 	sb.WriteString(line(""))
-	sb.WriteString(line(" " + creamStyle.Render("Fresh auth is stored. Tokens are encrypted and never shown in the TUI.")))
+	sb.WriteString(line(" " + creamStyle.Render("Fresh auth is stored. Access tokens are encrypted and never shown.")))
 	sb.WriteString(line(""))
-	sb.WriteString(line(" " + brandStyle.Render("What next?")))
+	sb.WriteString(line(" " + brandStyle.Render("Next request")))
 	sb.WriteString(line(""))
 	for i, choice := range m.choices {
 		label := fmt.Sprintf("%d. %s", i+1, choice)
@@ -221,7 +229,7 @@ func loginSuccessMessage(isFirstAuth, wasReauth bool) string {
 
 func loginSuccessChoiceHint(choice string) string {
 	switch choice {
-	case "Instamart":
+	case "Continue to Instamart":
 		return mutedStyle.Render("search groceries and build a cart")
 	case "Home":
 		return mutedStyle.Render("return to the command center")

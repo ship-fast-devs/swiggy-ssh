@@ -11,8 +11,10 @@ type RevokedView struct{}
 
 func (v RevokedView) Render(ctx context.Context, w io.Writer) error {
 	content := "\r\n" +
-		"  " + errorStyle.Render("Your account access has been revoked.") + "\r\n" +
-		"  " + creamStyle.Render("Please contact support.") + "\r\n"
+		"  " + errorStyle.Render("GET /account 403 Forbidden") + "\r\n" +
+		"  " + mutedStyle.Render("error:") + "\r\n" +
+		"  " + brandStyle.Render("code   :") + " " + errorStyle.Render("account_revoked") + "\r\n" +
+		"  " + brandStyle.Render("message:") + " " + creamStyle.Render("Your account access has been revoked. Please contact support.") + "\r\n"
 	_, err := fmt.Fprint(w, centerInViewport(content, viewportFromContext(ctx)))
 	return err
 }
@@ -23,7 +25,11 @@ type ErrorView struct {
 }
 
 func (v ErrorView) Render(ctx context.Context, w io.Writer) error {
-	content := "\r\n  " + errorStyle.Render(v.Message) + "\r\n"
+	content := "\r\n" +
+		"  " + errorStyle.Render("GET /account 500 Internal Server Error") + "\r\n" +
+		"  " + mutedStyle.Render("error:") + "\r\n" +
+		"  " + brandStyle.Render("code   :") + " " + errorStyle.Render("request_failed") + "\r\n" +
+		"  " + brandStyle.Render("message:") + " " + creamStyle.Render(v.Message) + "\r\n"
 	_, err := fmt.Fprint(w, centerInViewport(content, viewportFromContext(ctx)))
 	return err
 }

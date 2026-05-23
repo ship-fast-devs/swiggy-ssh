@@ -266,6 +266,33 @@ func TestEnsureValidAccountReconnectRequiredTriggersReauth(t *testing.T) {
 	}
 }
 
+func TestRequireReconnectMarksExistingAccountAndPreservesToken(t *testing.T) {
+	future := time.Now().UTC().Add(time.Hour)
+	repo := &mockAuthRepo{account: auth.OAuthAccount{
+		ID:             "account-1",
+		SSHIdentityID:  "identity-1",
+		Provider:       auth.MockProvider,
+		AccessToken:    "real-token-value",
+		TokenExpiresAt: &future,
+		Scopes:         []string{"mcp:tools"},
+		Status:         auth.OAuthAccountStatusActive,
+	}}
+	useCase := auth.NewEnsureValidAccountUseCase(repo)
+
+	if err := useCase.RequireReconnect(context.Background(), "identity-1"); err != nil {
+		t.Fatalf("require reconnect: %v", err)
+	}
+	if repo.upserted.Status != auth.OAuthAccountStatusReconnectRequired {
+		t.Fatalf("expected reconnect_required, got %s", repo.upserted.Status)
+	}
+	if repo.upserted.AccessToken != "real-token-value" {
+		t.Fatal("access token must be preserved")
+	}
+	if repo.upserted.TokenExpiresAt == nil || !repo.upserted.TokenExpiresAt.Equal(future) {
+		t.Fatalf("token expiry must be preserved, got %#v", repo.upserted.TokenExpiresAt)
+	}
+}
+
 func TestEnsureValidAccountRevokedReturnsError(t *testing.T) {
 	repo := &mockAuthRepo{
 		account: auth.OAuthAccount{
