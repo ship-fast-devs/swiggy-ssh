@@ -649,7 +649,7 @@ func (s *SSHServer) authenticateSessionForApp(ctx context.Context, ch ssh.Channe
 	return false, resolvedSSHIdentityID
 }
 
-func (s *SSHServer) loadSessionAddresses(ctx context.Context, userID string, state *sessionAddressState) {
+func (s *SSHServer) loadSessionAddresses(ctx context.Context, sshIdentityID string, state *sessionAddressState) {
 	if state == nil || !state.authenticated {
 		return
 	}
