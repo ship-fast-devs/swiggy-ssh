@@ -53,7 +53,7 @@ var ErrBrowserAuthProviderUnavailable = domainauth.ErrBrowserAuthProviderUnavail
 var ErrBrowserAuthProviderCallback = domainauth.ErrBrowserAuthProviderCallback
 var ErrLoginCodeNotFound = domainauth.ErrLoginCodeNotFound
 var ErrLoginCodeAlreadyUsed = domainauth.ErrLoginCodeAlreadyUsed
-var ErrOAuthAccountUserRequired = domainauth.ErrOAuthAccountUserRequired
+var ErrSSHIdentityRequired = domainauth.ErrSSHIdentityRequired
 
 var ValidateTokenForUse = domainauth.ValidateTokenForUse
 
@@ -64,7 +64,7 @@ const (
 
 // EnsureValidAccountInput contains the account context needed to validate or establish an OAuth account.
 type EnsureValidAccountInput struct {
-	UserID             string
+	SSHIdentityID      string
 	AllowFirstAuth     bool
 	Reauth             func(ctx context.Context) error
 	AuthAttemptService BrowserAuthAttemptService
@@ -97,10 +97,10 @@ func NewEnsureValidAccountUseCase(repo Repository) *EnsureValidAccountUseCase {
 	}
 }
 
-// Execute checks or establishes a valid OAuth account for input.UserID.
+// Execute checks or establishes a valid OAuth account for input.SSHIdentityID.
 //
 // Behaviour:
-//   - If UserID is empty → returns ErrOAuthAccountUserRequired without querying/persisting accounts.
+//   - If SSHIdentityID is empty → returns ErrSSHIdentityRequired without querying/persisting accounts.
 //   - If no account exists and AllowFirstAuth is true with AuthAttemptService → returns AuthRequired with a direct login URL.
 //   - If no account exists and AllowFirstAuth is true without AuthAttemptService → creates a mock active account and returns IsFirstAuth=true.
 //   - If no account exists and AllowFirstAuth is false → returns ErrOAuthAccountNotFound.
@@ -113,11 +113,11 @@ func NewEnsureValidAccountUseCase(repo Repository) *EnsureValidAccountUseCase {
 // It should issue a new login code, show it to the user, poll for completion,
 // and return nil on success or an error (including context cancellation) on failure.
 func (s *EnsureValidAccountUseCase) Execute(ctx context.Context, input EnsureValidAccountInput) (EnsureValidAccountOutput, error) {
-	if input.UserID == "" {
-		return EnsureValidAccountOutput{}, ErrOAuthAccountUserRequired
+	if input.SSHIdentityID == "" {
+		return EnsureValidAccountOutput{}, ErrSSHIdentityRequired
 	}
 
-	account, err := s.repo.FindOAuthAccountByUserAndProvider(ctx, input.UserID, MockProvider)
+	account, err := s.repo.FindOAuthAccountBySSHIdentityAndProvider(ctx, input.SSHIdentityID, MockProvider)
 	if err != nil {
 		if errors.Is(err, ErrOAuthAccountNotFound) {
 			if !input.AllowFirstAuth {
@@ -126,7 +126,7 @@ func (s *EnsureValidAccountUseCase) Execute(ctx context.Context, input EnsureVal
 			if input.AuthAttemptService != nil {
 				return s.issueAuthRequired(ctx, input)
 			}
-			newAccount, createErr := s.createMockAccount(ctx, input.UserID)
+			newAccount, createErr := s.createMockAccount(ctx, input.SSHIdentityID)
 			if createErr != nil {
 				return EnsureValidAccountOutput{}, fmt.Errorf("create mock oauth account: %w", createErr)
 			}
@@ -149,7 +149,7 @@ func (s *EnsureValidAccountUseCase) Execute(ctx context.Context, input EnsureVal
 			if reauthErr := input.Reauth(ctx); reauthErr != nil {
 				return EnsureValidAccountOutput{}, fmt.Errorf("reauth: %w", reauthErr)
 			}
-			refreshed, refreshErr := s.refreshMockAccount(ctx, input.UserID, account)
+			refreshed, refreshErr := s.refreshMockAccount(ctx, input.SSHIdentityID, account)
 			if refreshErr != nil {
 				return EnsureValidAccountOutput{}, fmt.Errorf("refresh mock account after reauth: %w", refreshErr)
 			}
@@ -163,7 +163,7 @@ func (s *EnsureValidAccountUseCase) Execute(ctx context.Context, input EnsureVal
 }
 
 func (s *EnsureValidAccountUseCase) issueAuthRequired(ctx context.Context, input EnsureValidAccountInput) (EnsureValidAccountOutput, error) {
-	rawAttempt, _, err := input.AuthAttemptService.IssueAuthAttempt(ctx, input.UserID, input.TerminalSessionID)
+	rawAttempt, _, err := input.AuthAttemptService.IssueAuthAttempt(ctx, input.SSHIdentityID, input.TerminalSessionID)
 	if err != nil {
 		return EnsureValidAccountOutput{}, fmt.Errorf("issue auth attempt: %w", err)
 	}
@@ -176,14 +176,14 @@ func (s *EnsureValidAccountUseCase) issueAuthRequired(ctx context.Context, input
 
 // createMockAccount creates a new mock OAuth account for a first-time user.
 // The mock token is a placeholder — no real Swiggy credentials.
-func (s *EnsureValidAccountUseCase) createMockAccount(ctx context.Context, userID string) (OAuthAccount, error) {
+func (s *EnsureValidAccountUseCase) createMockAccount(ctx context.Context, sshIdentityID string) (OAuthAccount, error) {
 	now := s.now()
 	expiresAt := now.Add(mockTokenTTL)
 
 	return s.repo.UpsertOAuthAccount(ctx, OAuthAccount{
-		UserID:         userID,
+		SSHIdentityID:  sshIdentityID,
 		Provider:       MockProvider,
-		AccessToken:    mockAccessToken(userID),
+		AccessToken:    mockAccessToken(sshIdentityID),
 		TokenExpiresAt: &expiresAt,
 		Scopes:         []string{"profile:read"},
 		Status:         OAuthAccountStatusActive,
@@ -191,18 +191,18 @@ func (s *EnsureValidAccountUseCase) createMockAccount(ctx context.Context, userI
 }
 
 // refreshMockAccount updates an existing account with a new mock token after re-auth.
-func (s *EnsureValidAccountUseCase) refreshMockAccount(ctx context.Context, userID string, existing OAuthAccount) (OAuthAccount, error) {
+func (s *EnsureValidAccountUseCase) refreshMockAccount(ctx context.Context, sshIdentityID string, existing OAuthAccount) (OAuthAccount, error) {
 	now := s.now()
 	expiresAt := now.Add(mockTokenTTL)
 
-	existing.AccessToken = mockAccessToken(userID)
+	existing.AccessToken = mockAccessToken(sshIdentityID)
 	existing.TokenExpiresAt = &expiresAt
 	existing.Status = OAuthAccountStatusActive
 	return s.repo.UpsertOAuthAccount(ctx, existing)
 }
 
-// mockAccessToken returns the placeholder token value for a given userID.
+// mockAccessToken returns the placeholder token value for a given SSH identity ID.
 // Mock tokens are never real Swiggy credentials.
-func mockAccessToken(userID string) string {
-	return fmt.Sprintf("mock-token-%s", userID)
+func mockAccessToken(sshIdentityID string) string {
+	return fmt.Sprintf("mock-token-%s", sshIdentityID)
 }

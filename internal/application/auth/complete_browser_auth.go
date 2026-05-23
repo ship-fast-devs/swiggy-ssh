@@ -50,11 +50,11 @@ func (s *CompleteBrowserAuthUseCase) ExecuteCallback(ctx context.Context, input 
 	if err != nil {
 		return CompleteBrowserAuthOutput{}, err
 	}
-	if attempt.UserID == "" {
+	if attempt.SSHIdentityID == "" {
 		if cancelErr := s.attemptSvc.CancelClaimedAuthAttempt(ctx, input.State); cancelErr != nil {
 			return CompleteBrowserAuthOutput{}, fmt.Errorf("cancel guest browser auth attempt: %w", cancelErr)
 		}
-		return CompleteBrowserAuthOutput{}, ErrOAuthAccountUserRequired
+		return CompleteBrowserAuthOutput{}, ErrSSHIdentityRequired
 	}
 	input.CodeVerifier = attempt.CodeVerifier
 	credentials, err := s.callback.ExchangeBrowserAuthCallback(ctx, input)
@@ -76,21 +76,21 @@ func (s *CompleteBrowserAuthUseCase) completeWithCredentials(ctx context.Context
 }
 
 func (s *CompleteBrowserAuthUseCase) completeClaimedWithCredentials(ctx context.Context, rawAttemptToken string, attempt BrowserAuthAttempt, credentials BrowserAuthCredentials) (CompleteBrowserAuthOutput, error) {
-	if attempt.UserID == "" {
+	if attempt.SSHIdentityID == "" {
 		if err := s.attemptSvc.CancelClaimedAuthAttempt(ctx, rawAttemptToken); err != nil {
 			return CompleteBrowserAuthOutput{}, fmt.Errorf("cancel guest browser auth attempt: %w", err)
 		}
-		return CompleteBrowserAuthOutput{}, ErrOAuthAccountUserRequired
+		return CompleteBrowserAuthOutput{}, ErrSSHIdentityRequired
 	}
 
 	var err error
 	var account OAuthAccount
 	accessToken := credentials.AccessToken
 	if accessToken == mockAccessToken("") {
-		accessToken = mockAccessToken(attempt.UserID)
+		accessToken = mockAccessToken(attempt.SSHIdentityID)
 	}
 	account, err = s.repo.UpsertOAuthAccount(ctx, OAuthAccount{
-		UserID:         attempt.UserID,
+		SSHIdentityID:  attempt.SSHIdentityID,
 		Provider:       MockProvider,
 		ProviderUserID: credentials.ProviderUserID,
 		AccessToken:    accessToken,

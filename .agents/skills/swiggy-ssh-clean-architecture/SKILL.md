@@ -34,7 +34,7 @@ internal/platform/config|logging/       app-wide config/logging primitives
 Examples already in the repo:
 - `internal/domain/auth`: `OAuthAccount`, login-code/token errors, `Repository`, `LoginCodeService`, `TokenEncryptor`
 - `internal/application/auth`: `EnsureValidAccountUseCase.Execute(ctx, input)` OAuth account use case
-- `internal/domain/identity`: `User`, `SSHIdentity`, `TerminalSession`, `Repository`, `SessionRepository`
+- `internal/domain/identity`: `SSHIdentity`, `TerminalSession`, `Repository`, `SessionRepository`
 - `internal/application/identity`: `ResolveSSHIdentityUseCase`, `StartTerminalSessionUseCase`, `EndTerminalSessionUseCase`
 - `internal/presentation/ssh`: SSH listener/session routing and TUI launch
 - `internal/infrastructure/persistence/postgres`: `PostgresStore` implementing domain repositories
@@ -64,7 +64,7 @@ Hard rule: presentation adapters must never import infrastructure packages. If S
 Prefer names that say what role the type plays in this architecture.
 
 ### Domain
-- Entities/value objects: nouns from the business: `User`, `SSHIdentity`, `OAuthAccount`, `TerminalSession`, future `Product`, `Cart`, `CheckoutSession`.
+- Entities/value objects: nouns from the business: `SSHIdentity`, `OAuthAccount`, `TerminalSession`, future `Product`, `Cart`, `CheckoutSession`.
 - Domain errors: sentinel `Err...` values in the feature domain package: `ErrOAuthAccountNotFound`, `ErrTokenRevoked`.
 - Ports:
   - Persistence boundary: `Repository` when there is one primary feature repository in the package.
@@ -100,7 +100,7 @@ internal/domain/instamart/
   ports.go                ProductProvider interface
 
 internal/application/instamart/
-  product_search.go       ProductSearchService.Search(ctx, userID, query)
+  product_search.go       ProductSearchService.Search(ctx, sshIdentityID, query)
 
 internal/infrastructure/provider/swiggy/
   client.go               SwiggyClient implements instamart.ProductProvider

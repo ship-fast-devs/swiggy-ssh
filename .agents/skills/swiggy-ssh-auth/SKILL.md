@@ -53,11 +53,11 @@ They share one thing: a **browser auth attempt** stored in Redis. The SSH TUI re
 - When a public key is provided, the server accepts it for transport and preserves metadata in `ssh.Permissions`
 - The server computes a short unique fingerprint from the public key: `ssh.FingerprintSHA256(key)`
 - Known fingerprints are stored in `ssh_identities.public_key_fingerprint` in Postgres
-- On reconnect with a known, non-revoked key, `ResolveSSHIdentityUseCase.Execute(ctx, input)` looks up the fingerprint → finds the linked user
+- On reconnect with a known, non-revoked key, `ResolveSSHIdentityUseCase.Execute(ctx, input)` looks up the fingerprint → finds the durable SSH identity
 - Unknown fingerprints return `ErrNotFound` during initial session resolution
 - Revoked known keys return `ErrSSHIdentityRevoked` and are not treated as durable identities
-- No-key and unknown-key SSH connections start guest terminal sessions with no `user_id` or `ssh_identity_id`; unknown-key sessions keep the fingerprint on the terminal session for observability
-- When an unknown-key user chooses Instamart/login, `RegisterSSHIdentityUseCase` provisions or resolves a durable `User + SSHIdentity` before issuing a browser auth attempt. This gives the OAuth callback a real `user_id` for token persistence.
+- No-key and unknown-key SSH connections start guest terminal sessions with no `ssh_identity_id`; unknown-key sessions keep the fingerprint on the terminal session for observability
+- When an unknown-key user chooses Instamart/login, `RegisterSSHIdentityUseCase` provisions or resolves a durable `SSHIdentity` before issuing a browser auth attempt. This gives the OAuth callback a real `ssh_identity_id` for token persistence.
 
 **Why accept any key?** The SSH key is not an access gate. It is a durable-account lookup hint. Unknown keys begin as guest sessions and are only persisted when the user explicitly starts Swiggy login.
 
@@ -129,7 +129,7 @@ https://mcp.swiggy.com/auth/authorize?
 
 ## Concept 5: OAuth Token Lifecycle & Re-authentication
 
-**What it is:** After browser login, the server stores a Swiggy OAuth access token linked to the user. Tokens expire and must be refreshed via re-authentication.
+**What it is:** After browser login, the server stores a Swiggy OAuth access token linked to the SSH identity. Tokens expire and must be refreshed via re-authentication.
 
 **Token states:**
 ```
@@ -163,26 +163,23 @@ revoked            → "Access revoked. Contact support."
 Four linked tables in Postgres:
 
 ```
-users
-  id, display_name, email, created_at, last_seen_at
-
-ssh_identities             (one user → many SSH keys)
-  id, user_id → users.id
+ssh_identities             (durable app principal)
+  id
   public_key_fingerprint   ← unique, indexed, used for lookup
   public_key               ← full public key stored
   label                    ← e.g. "MacBook Pro"
   first_seen_at, last_seen_at
   revoked_at               ← set when key is revoked (e.g. lost laptop)
 
-oauth_accounts             (one user → one account per provider)
-  id, user_id → users.id
+oauth_accounts             (one SSH identity → one account per provider)
+  id, ssh_identity_id → ssh_identities.id
   provider                 ← e.g. "swiggy"
   provider_user_id
   encrypted_access_token   ← AES-256-GCM encrypted, never stored in plaintext
   token_expires_at, scopes, status
 
-terminal_sessions          (one user → many sessions)
-  id, user_id → users.id
+terminal_sessions          (one SSH identity → many durable sessions; guests have no identity id)
+  id
   ssh_identity_id → ssh_identities.id
   ssh_fingerprint
   current_screen, selected_address_id
@@ -219,12 +216,12 @@ terminal_sessions          (one user → many sessions)
         ↓
 3. Server accepts SSH with or without a client public key
    - If a key is provided, computes its fingerprint
-   - Looks up fingerprint in DB → known key resolves durable user identity
+   - Looks up fingerprint in DB → known key resolves durable SSH identity
    - Unknown key or no key → guest session at first
         ↓
 4. User chooses Instamart from the terminal home screen
         ↓
-5. If login is required and a public key is present, server provisions/resolves durable `User + SSHIdentity`
+5. If login is required and a public key is present, server provisions/resolves a durable `SSHIdentity`
    - Creates browser auth attempt with PKCE verifier, TTL default 10 minutes
    - Shows user: "Open swiggy.dev/auth/start?attempt=..."
    - Starts polling Redis every 2 seconds
@@ -248,7 +245,6 @@ terminal_sessions          (one user → many sessions)
 | Missing piece | Where to add it |
 |---------------|----------------|
 | Real Instamart API calls using stored token | `internal/infrastructure/provider/swiggy/client.go` |
-| Terminal session user update after first-login provisioning | `internal/application/identity` + persistence session repository |
 | Refresh tokens | Not available in Swiggy v1.0; re-run OAuth on 401/expiry |
 | Full `LoginCode*` naming cleanup | Auth domain/cache/config follow-up |
 
@@ -284,5 +280,5 @@ terminal_sessions          (one user → many sessions)
 | Login URL cannot be copied | Use the wrapped fallback URL; `c` attempts OSC-52 clipboard copy but terminal support varies |
 | User sees "fingerprint changed" warning | Old host key on disk differs from new one — delete `.local/ssh_host_ed25519_key` or restore the correct key |
 | Token expired but re-auth not triggered | Check `ValidateTokenForUse` — token status must be `expired` or `reconnect_required` to trigger re-auth |
-| Unknown SSH key creates a persistent user too early | Initial resolve must return guest; durable user/key creation happens only when the user explicitly starts login |
-| OAuth callback has empty user id | Browser auth attempts must be issued only after durable identity provisioning; callback rejects empty-user attempts defensively |
+| Unknown SSH key creates a persistent identity too early | Initial resolve must return guest; durable SSH identity creation happens only when the user explicitly starts login |
+| OAuth callback has empty SSH identity id | Browser auth attempts must be issued only after durable identity provisioning; callback rejects empty-identity attempts defensively |

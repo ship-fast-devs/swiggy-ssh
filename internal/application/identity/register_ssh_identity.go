@@ -28,7 +28,7 @@ func NewRegisterSSHIdentityUseCase(repo Repository) *RegisterSSHIdentityUseCase 
 	}
 }
 
-// Execute resolves an existing SSH identity or creates a durable user linked to the provided key.
+// Execute resolves an existing SSH identity or creates a durable identity for the provided key.
 func (r *RegisterSSHIdentityUseCase) Execute(ctx context.Context, input RegisterSSHIdentityInput) (SessionIdentity, error) {
 	if input.Key == nil {
 		return SessionIdentity{}, ErrMissingSSHPublicKey
@@ -45,10 +45,7 @@ func (r *RegisterSSHIdentityUseCase) Execute(ctx context.Context, input Register
 		return SessionIdentity{}, err
 	}
 
-	user, sshIdentity, err := r.repo.CreateUserWithSSHIdentity(ctx, User{
-		DisplayName: "SSH User",
-		LastSeenAt:  &registeredAt,
-	}, SSHIdentity{
+	sshIdentity, err = r.repo.CreateSSHIdentity(ctx, SSHIdentity{
 		PublicKeyFingerprint: fingerprint,
 		PublicKey:            strings.TrimSpace(string(ssh.MarshalAuthorizedKey(input.Key))),
 		Label:                input.Label,
@@ -65,5 +62,5 @@ func (r *RegisterSSHIdentityUseCase) Execute(ctx context.Context, input Register
 		return SessionIdentity{}, err
 	}
 
-	return domainidentity.SessionIdentity{Client: input.Client, User: user, SSHIdentity: sshIdentity}, nil
+	return domainidentity.SessionIdentity{Client: input.Client, SSHIdentity: sshIdentity}, nil
 }

@@ -48,7 +48,7 @@ func mockHashToken(rawToken string) string {
 	return hex.EncodeToString(h[:])
 }
 
-func (m *MockLoginCodeService) IssueAuthAttempt(ctx context.Context, userID, terminalSessionID string) (string, auth.BrowserAuthAttempt, error) {
+func (m *MockLoginCodeService) IssueAuthAttempt(ctx context.Context, sshIdentityID, terminalSessionID string) (string, auth.BrowserAuthAttempt, error) {
 	rawToken, err := m.generateToken()
 	if err != nil {
 		return "", auth.BrowserAuthAttempt{}, err
@@ -64,7 +64,7 @@ func (m *MockLoginCodeService) IssueAuthAttempt(ctx context.Context, userID, ter
 		TokenHash:         tokenHash,
 		CodeHash:          tokenHash,
 		CodeVerifier:      codeVerifier,
-		UserID:            userID,
+		SSHIdentityID:     sshIdentityID,
 		TerminalSessionID: terminalSessionID,
 		Status:            auth.AuthAttemptStatusPending,
 		ExpiresAt:         now.Add(m.ttl),
@@ -158,8 +158,8 @@ func (m *MockLoginCodeService) SetGenerateCode(f func() (string, error)) {
 	m.mu.Unlock()
 }
 
-func (m *MockLoginCodeService) IssueLoginCode(ctx context.Context, userID, terminalSessionID string) (string, auth.LoginCode, error) {
-	return m.IssueAuthAttempt(ctx, userID, terminalSessionID)
+func (m *MockLoginCodeService) IssueLoginCode(ctx context.Context, sshIdentityID, terminalSessionID string) (string, auth.LoginCode, error) {
+	return m.IssueAuthAttempt(ctx, sshIdentityID, terminalSessionID)
 }
 
 func (m *MockLoginCodeService) GetLoginCode(ctx context.Context, rawCode string) (auth.LoginCode, error) {

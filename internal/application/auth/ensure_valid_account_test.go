@@ -23,12 +23,12 @@ type mockAuthRepo struct {
 
 type mockAttemptService struct{}
 
-func (m *mockAttemptService) IssueAuthAttempt(_ context.Context, userID, terminalSessionID string) (string, auth.BrowserAuthAttempt, error) {
+func (m *mockAttemptService) IssueAuthAttempt(_ context.Context, sshIdentityID, terminalSessionID string) (string, auth.BrowserAuthAttempt, error) {
 	rawToken := "opaque-attempt-token"
 	h := sha256.Sum256([]byte(rawToken))
 	return rawToken, auth.BrowserAuthAttempt{
 		TokenHash:         hex.EncodeToString(h[:]),
-		UserID:            userID,
+		SSHIdentityID:     sshIdentityID,
 		TerminalSessionID: terminalSessionID,
 		Status:            auth.AuthAttemptStatusPending,
 	}, nil
@@ -54,7 +54,7 @@ func (m *mockAttemptService) CancelClaimedAuthAttempt(_ context.Context, _ strin
 
 func (m *mockAttemptService) CancelAuthAttempt(_ context.Context, _ string) error { return nil }
 
-func (r *mockAuthRepo) FindOAuthAccountByUserAndProvider(_ context.Context, _, _ string) (auth.OAuthAccount, error) {
+func (r *mockAuthRepo) FindOAuthAccountBySSHIdentityAndProvider(_ context.Context, _, _ string) (auth.OAuthAccount, error) {
 	r.findCalls++
 	return r.account, r.findErr
 }
@@ -71,7 +71,7 @@ func TestEnsureValidAccountMissingAccountWithoutFirstAuthReturnsNotFound(t *test
 	useCase := auth.NewEnsureValidAccountUseCase(repo)
 
 	_, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{
-		UserID: "user-1",
+		SSHIdentityID: "identity-1",
 	})
 	if !errors.Is(err, auth.ErrOAuthAccountNotFound) {
 		t.Fatalf("expected ErrOAuthAccountNotFound, got %v", err)
@@ -83,7 +83,7 @@ func TestEnsureValidAccountFirstAuth(t *testing.T) {
 	useCase := auth.NewEnsureValidAccountUseCase(repo)
 
 	result, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{
-		UserID:         "user-1",
+		SSHIdentityID:  "identity-1",
 		AllowFirstAuth: true,
 	})
 	if err != nil {
@@ -95,8 +95,8 @@ func TestEnsureValidAccountFirstAuth(t *testing.T) {
 	if result.Account.Status != auth.OAuthAccountStatusActive {
 		t.Fatalf("expected active status, got %s", result.Account.Status)
 	}
-	if repo.upserted.UserID != "user-1" {
-		t.Fatalf("expected upserted user-1, got %s", repo.upserted.UserID)
+	if repo.upserted.SSHIdentityID != "identity-1" {
+		t.Fatalf("expected upserted identity-1, got %s", repo.upserted.SSHIdentityID)
 	}
 }
 
@@ -105,7 +105,7 @@ func TestEnsureValidAccountMissingAccountReturnsDirectAuthURL(t *testing.T) {
 	useCase := auth.NewEnsureValidAccountUseCase(repo)
 
 	result, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{
-		UserID:             "user-1",
+		SSHIdentityID:      "identity-1",
 		AllowFirstAuth:     true,
 		AuthAttemptService: &mockAttemptService{},
 		TerminalSessionID:  "session-1",
@@ -135,8 +135,8 @@ func TestEnsureValidAccountGuestAuthAttemptReturnsControlledError(t *testing.T) 
 		TerminalSessionID:  "session-1",
 		PublicBaseURL:      "http://localhost:8080",
 	})
-	if !errors.Is(err, auth.ErrOAuthAccountUserRequired) {
-		t.Fatalf("expected ErrOAuthAccountUserRequired, got %v", err)
+	if !errors.Is(err, auth.ErrSSHIdentityRequired) {
+		t.Fatalf("expected ErrSSHIdentityRequired, got %v", err)
 	}
 	if repo.findCalls != 0 {
 		t.Fatalf("expected no oauth lookup for guest, got %d", repo.findCalls)
@@ -148,8 +148,8 @@ func TestEnsureValidAccountGuestWithoutAuthAttemptReturnsControlledError(t *test
 	useCase := auth.NewEnsureValidAccountUseCase(repo)
 
 	_, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{AllowFirstAuth: true})
-	if !errors.Is(err, auth.ErrOAuthAccountUserRequired) {
-		t.Fatalf("expected ErrOAuthAccountUserRequired, got %v", err)
+	if !errors.Is(err, auth.ErrSSHIdentityRequired) {
+		t.Fatalf("expected ErrSSHIdentityRequired, got %v", err)
 	}
 	if repo.findCalls != 0 {
 		t.Fatalf("expected no oauth lookup for guest, got %d", repo.findCalls)
@@ -168,7 +168,7 @@ func TestEnsureValidAccountReturningValid(t *testing.T) {
 	reauthCalled := false
 	useCase := auth.NewEnsureValidAccountUseCase(repo)
 
-	result, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{UserID: "user-1", Reauth: func(_ context.Context) error {
+	result, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{SSHIdentityID: "identity-1", Reauth: func(_ context.Context) error {
 		reauthCalled = true
 		return nil
 	}})
@@ -195,7 +195,7 @@ func TestEnsureValidAccountExpiredTriggersReauth(t *testing.T) {
 	reauthCalled := false
 	useCase := auth.NewEnsureValidAccountUseCase(repo)
 
-	result, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{UserID: "user-1", Reauth: func(_ context.Context) error {
+	result, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{SSHIdentityID: "identity-1", Reauth: func(_ context.Context) error {
 		reauthCalled = true
 		return nil
 	}})
@@ -225,7 +225,7 @@ func TestEnsureValidAccountExpiredCanReturnDirectAuthURL(t *testing.T) {
 	useCase := auth.NewEnsureValidAccountUseCase(repo)
 
 	result, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{
-		UserID:             "user-1",
+		SSHIdentityID:      "identity-1",
 		AuthAttemptService: &mockAttemptService{},
 		TerminalSessionID:  "session-1",
 		PublicBaseURL:      "http://localhost:8080",
@@ -251,7 +251,7 @@ func TestEnsureValidAccountReconnectRequiredTriggersReauth(t *testing.T) {
 	reauthCalled := false
 	useCase := auth.NewEnsureValidAccountUseCase(repo)
 
-	result, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{UserID: "user-1", Reauth: func(_ context.Context) error {
+	result, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{SSHIdentityID: "identity-1", Reauth: func(_ context.Context) error {
 		reauthCalled = true
 		return nil
 	}})
@@ -276,7 +276,7 @@ func TestEnsureValidAccountRevokedReturnsError(t *testing.T) {
 	reauthCalled := false
 	useCase := auth.NewEnsureValidAccountUseCase(repo)
 
-	_, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{UserID: "user-1", Reauth: func(_ context.Context) error {
+	_, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{SSHIdentityID: "identity-1", Reauth: func(_ context.Context) error {
 		reauthCalled = true
 		return nil
 	}})

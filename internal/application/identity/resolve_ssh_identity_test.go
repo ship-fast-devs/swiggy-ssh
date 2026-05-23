@@ -12,38 +12,14 @@ import (
 )
 
 type testRepo struct {
-	userByID        map[string]User
 	identityByFP    map[string]SSHIdentity
 	createCalled    bool
-	updatedUserID   string
 	updatedFP       string
 	updatedLastSeen time.Time
 }
 
 func newTestRepo() *testRepo {
-	return &testRepo{userByID: map[string]User{}, identityByFP: map[string]SSHIdentity{}}
-}
-
-func (r *testRepo) CreateUser(context.Context, User) (User, error) { panic("unexpected call") }
-func (r *testRepo) CreateSSHIdentity(context.Context, SSHIdentity) (SSHIdentity, error) {
-	panic("unexpected call")
-}
-
-func (r *testRepo) FindUserByID(_ context.Context, userID string) (User, error) {
-	user, ok := r.userByID[userID]
-	if !ok {
-		return User{}, ErrNotFound
-	}
-	return user, nil
-}
-
-func (r *testRepo) UpdateUserLastSeen(_ context.Context, userID string, lastSeenAt time.Time) error {
-	r.updatedUserID = userID
-	r.updatedLastSeen = lastSeenAt
-	user := r.userByID[userID]
-	user.LastSeenAt = &lastSeenAt
-	r.userByID[userID] = user
-	return nil
+	return &testRepo{identityByFP: map[string]SSHIdentity{}}
 }
 
 func (r *testRepo) FindSSHIdentityByFingerprint(_ context.Context, fingerprint string) (SSHIdentity, error) {
@@ -54,6 +30,15 @@ func (r *testRepo) FindSSHIdentityByFingerprint(_ context.Context, fingerprint s
 	return identity, nil
 }
 
+func (r *testRepo) CreateSSHIdentity(_ context.Context, sshIdentity SSHIdentity) (SSHIdentity, error) {
+	r.createCalled = true
+	now := time.Now().UTC()
+	sshIdentity.ID = "new-identity"
+	sshIdentity.FirstSeenAt = now
+	r.identityByFP[sshIdentity.PublicKeyFingerprint] = sshIdentity
+	return sshIdentity, nil
+}
+
 func (r *testRepo) UpdateSSHIdentityLastSeen(_ context.Context, fingerprint string, lastSeenAt time.Time) error {
 	r.updatedFP = fingerprint
 	r.updatedLastSeen = lastSeenAt
@@ -61,21 +46,6 @@ func (r *testRepo) UpdateSSHIdentityLastSeen(_ context.Context, fingerprint stri
 	identity.LastSeenAt = &lastSeenAt
 	r.identityByFP[fingerprint] = identity
 	return nil
-}
-
-func (r *testRepo) CreateUserWithSSHIdentity(_ context.Context, user User, sshIdentity SSHIdentity) (User, SSHIdentity, error) {
-	r.createCalled = true
-	if user.ID == "" {
-		user.ID = "new-user"
-	}
-	now := time.Now().UTC()
-	user.CreatedAt = now
-	sshIdentity.ID = "new-identity"
-	sshIdentity.UserID = user.ID
-	sshIdentity.FirstSeenAt = now
-	r.userByID[user.ID] = user
-	r.identityByFP[sshIdentity.PublicKeyFingerprint] = sshIdentity
-	return user, sshIdentity, nil
 }
 
 func newSSHPublicKey(t *testing.T) ssh.PublicKey {
@@ -99,22 +69,18 @@ func TestResolveSSHIdentityFoundIdentity(t *testing.T) {
 
 	key := newSSHPublicKey(t)
 	fingerprint := ssh.FingerprintSHA256(key)
-	repo.userByID["u1"] = User{ID: "u1", DisplayName: "Existing"}
-	repo.identityByFP[fingerprint] = SSHIdentity{ID: "i1", UserID: "u1", PublicKeyFingerprint: fingerprint}
+	repo.identityByFP[fingerprint] = SSHIdentity{ID: "i1", PublicKeyFingerprint: fingerprint}
 
 	resolved, err := useCase.Execute(context.Background(), ResolveSSHIdentityInput{Client: "ssh", Key: key})
 	if err != nil {
 		t.Fatalf("resolve key: %v", err)
 	}
 
-	if resolved.User.ID != "u1" {
-		t.Fatalf("expected user u1, got %s", resolved.User.ID)
+	if resolved.SSHIdentity.ID != "i1" {
+		t.Fatalf("expected ssh identity i1, got %s", resolved.SSHIdentity.ID)
 	}
 	if repo.updatedFP != fingerprint {
 		t.Fatalf("expected fingerprint update %s, got %s", fingerprint, repo.updatedFP)
-	}
-	if repo.updatedUserID != "u1" {
-		t.Fatalf("expected user last-seen update for u1, got %s", repo.updatedUserID)
 	}
 	if !repo.updatedLastSeen.Equal(fixedNow) {
 		t.Fatalf("expected updated last-seen %v, got %v", fixedNow, repo.updatedLastSeen)
@@ -132,7 +98,7 @@ func TestResolveSSHIdentityUnknownIdentityReturnsNotFound(t *testing.T) {
 	}
 
 	if repo.createCalled {
-		t.Fatal("unknown key must not create user or ssh identity")
+		t.Fatal("unknown key must not create ssh identity")
 	}
 }
 
@@ -142,7 +108,7 @@ func TestResolveSSHIdentityRevokedIdentityRejected(t *testing.T) {
 	key := newSSHPublicKey(t)
 	fingerprint := ssh.FingerprintSHA256(key)
 	revokedAt := time.Now().UTC()
-	repo.identityByFP[fingerprint] = SSHIdentity{ID: "i1", UserID: "u1", PublicKeyFingerprint: fingerprint, RevokedAt: &revokedAt}
+	repo.identityByFP[fingerprint] = SSHIdentity{ID: "i1", PublicKeyFingerprint: fingerprint, RevokedAt: &revokedAt}
 
 	_, err := useCase.Execute(context.Background(), ResolveSSHIdentityInput{Client: "ssh", Key: key})
 	if !errors.Is(err, ErrSSHIdentityRevoked) {
@@ -160,7 +126,7 @@ func TestResolveSSHIdentityMissingKeyRejected(t *testing.T) {
 	}
 }
 
-func TestRegisterSSHIdentityCreatesDurableUserAndReconnectResolvesSameUser(t *testing.T) {
+func TestRegisterSSHIdentityCreatesDurableIdentityAndReconnectResolvesSameIdentity(t *testing.T) {
 	repo := newTestRepo()
 	registerUseCase := NewRegisterSSHIdentityUseCase(repo)
 	resolveUseCase := NewResolveSSHIdentityUseCase(repo)
@@ -173,21 +139,15 @@ func TestRegisterSSHIdentityCreatesDurableUserAndReconnectResolvesSameUser(t *te
 	if err != nil {
 		t.Fatalf("register key: %v", err)
 	}
-	if registered.User.ID == "" {
-		t.Fatal("expected durable user id")
-	}
-	if registered.SSHIdentity.UserID != registered.User.ID {
-		t.Fatalf("expected ssh identity linked to user %s, got %s", registered.User.ID, registered.SSHIdentity.UserID)
+	if registered.SSHIdentity.ID == "" {
+		t.Fatal("expected durable ssh identity id")
 	}
 
 	reconnected, err := resolveUseCase.Execute(context.Background(), ResolveSSHIdentityInput{Client: ClientProtocolSSH, Key: key})
 	if err != nil {
 		t.Fatalf("resolve reconnected key: %v", err)
 	}
-	if reconnected.User.ID != registered.User.ID {
-		t.Fatalf("expected same user %s on reconnect, got %s", registered.User.ID, reconnected.User.ID)
-	}
-	if len(repo.userByID) != 1 {
-		t.Fatalf("expected one durable user, got %d", len(repo.userByID))
+	if reconnected.SSHIdentity.ID != registered.SSHIdentity.ID {
+		t.Fatalf("expected same ssh identity %s on reconnect, got %s", registered.SSHIdentity.ID, reconnected.SSHIdentity.ID)
 	}
 }

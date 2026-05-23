@@ -19,7 +19,7 @@ const (
 
 type FoodAppView struct {
 	Service         FoodService
-	UserID          string
+	SSHIdentityID   string
 	SelectedAddress domainfood.Address
 	StatusMessage   string
 	In              io.Reader
@@ -33,7 +33,7 @@ func (v FoodAppView) Render(ctx context.Context, w io.Writer) error {
 func (v FoodAppView) RenderWithResult(ctx context.Context, w io.Writer) (FoodResult, error) {
 	return foodflow.FoodAppView{
 		Service:         v.Service,
-		UserID:          v.UserID,
+		UserID:          v.SSHIdentityID,
 		SelectedAddress: v.SelectedAddress,
 		StatusMessage:   v.StatusMessage,
 		Viewport:        foodViewport(ctx),

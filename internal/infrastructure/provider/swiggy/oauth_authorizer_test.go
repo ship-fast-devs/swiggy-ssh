@@ -13,7 +13,7 @@ import (
 func TestOAuthAccountAuthorizerAddsBearerToken(t *testing.T) {
 	expires := time.Now().Add(time.Hour)
 	repo := &authorizerRepo{account: domainauth.OAuthAccount{
-		UserID:         "user-1",
+		SSHIdentityID:  "identity-1",
 		Provider:       oauthProvider,
 		AccessToken:    "token-1",
 		TokenExpiresAt: &expires,
@@ -24,7 +24,7 @@ func TestOAuthAccountAuthorizerAddsBearerToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
-	ctx := domainauth.ContextWithUserID(context.Background(), "user-1")
+	ctx := domainauth.ContextWithUserID(context.Background(), "identity-1")
 
 	if err := authorizer.AuthorizeMCPRequest(ctx, req); err != nil {
 		t.Fatalf("authorize request: %v", err)
@@ -32,8 +32,8 @@ func TestOAuthAccountAuthorizerAddsBearerToken(t *testing.T) {
 	if got := req.Header.Get("Authorization"); got != "Bearer token-1" {
 		t.Fatalf("unexpected authorization header %q", got)
 	}
-	if repo.userID != "user-1" || repo.provider != oauthProvider {
-		t.Fatalf("unexpected lookup user/provider: %q %q", repo.userID, repo.provider)
+	if repo.sshIdentityID != "identity-1" || repo.provider != oauthProvider {
+		t.Fatalf("unexpected lookup identity/provider: %q %q", repo.sshIdentityID, repo.provider)
 	}
 }
 
@@ -45,15 +45,15 @@ func TestOAuthAccountAuthorizerRequiresUserContext(t *testing.T) {
 	}
 
 	err = authorizer.AuthorizeMCPRequest(context.Background(), req)
-	if !errors.Is(err, domainauth.ErrOAuthAccountUserRequired) {
-		t.Fatalf("expected user required, got %v", err)
+	if !errors.Is(err, domainauth.ErrSSHIdentityRequired) {
+		t.Fatalf("expected ssh identity required, got %v", err)
 	}
 }
 
 func TestOAuthAccountAuthorizerRejectsExpiredToken(t *testing.T) {
 	expires := time.Now().Add(-time.Hour)
 	authorizer := NewOAuthAccountAuthorizer(&authorizerRepo{account: domainauth.OAuthAccount{
-		UserID:         "user-1",
+		SSHIdentityID:  "identity-1",
 		Provider:       oauthProvider,
 		AccessToken:    "token-1",
 		TokenExpiresAt: &expires,
@@ -63,7 +63,7 @@ func TestOAuthAccountAuthorizerRejectsExpiredToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
-	ctx := domainauth.ContextWithUserID(context.Background(), "user-1")
+	ctx := domainauth.ContextWithUserID(context.Background(), "identity-1")
 
 	err = authorizer.AuthorizeMCPRequest(ctx, req)
 	if !errors.Is(err, domainauth.ErrTokenExpired) {
@@ -75,18 +75,18 @@ func TestOAuthAccountAuthorizerRejectsExpiredToken(t *testing.T) {
 }
 
 type authorizerRepo struct {
-	account  domainauth.OAuthAccount
-	userID   string
-	provider string
-	err      error
+	account       domainauth.OAuthAccount
+	sshIdentityID string
+	provider      string
+	err           error
 }
 
 func (r *authorizerRepo) UpsertOAuthAccount(context.Context, domainauth.OAuthAccount) (domainauth.OAuthAccount, error) {
 	return domainauth.OAuthAccount{}, nil
 }
 
-func (r *authorizerRepo) FindOAuthAccountByUserAndProvider(_ context.Context, userID, provider string) (domainauth.OAuthAccount, error) {
-	r.userID = userID
+func (r *authorizerRepo) FindOAuthAccountBySSHIdentityAndProvider(_ context.Context, sshIdentityID, provider string) (domainauth.OAuthAccount, error) {
+	r.sshIdentityID = sshIdentityID
 	r.provider = provider
 	if r.err != nil {
 		return domainauth.OAuthAccount{}, r.err

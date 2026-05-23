@@ -24,11 +24,11 @@ func NewOAuthAccountAuthorizer(repo domainauth.Repository) *OAuthAccountAuthoriz
 }
 
 func (a *OAuthAccountAuthorizer) AuthorizeMCPRequest(ctx context.Context, req *http.Request) error {
-	userID, ok := domainauth.UserIDFromContext(ctx)
+	sshIdentityID, ok := domainauth.UserIDFromContext(ctx)
 	if !ok {
-		return domainauth.ErrOAuthAccountUserRequired
+		return domainauth.ErrSSHIdentityRequired
 	}
-	account, err := a.repo.FindOAuthAccountByUserAndProvider(ctx, userID, oauthProvider)
+	account, err := a.repo.FindOAuthAccountBySSHIdentityAndProvider(ctx, sshIdentityID, oauthProvider)
 	if err != nil {
 		return err
 	}

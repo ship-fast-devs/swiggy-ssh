@@ -7,9 +7,11 @@ import (
 )
 
 type testSessionRepo struct {
-	created TerminalSession
-	endedID string
-	endedAt time.Time
+	created            TerminalSession
+	endedID            string
+	endedAt            time.Time
+	attachedSessionID  string
+	attachedIdentityID string
 }
 
 func (r *testSessionRepo) CreateTerminalSession(_ context.Context, session TerminalSession) (TerminalSession, error) {
@@ -26,11 +28,16 @@ func (r *testSessionRepo) MarkTerminalSessionEnded(_ context.Context, sessionID 
 	return nil
 }
 
+func (r *testSessionRepo) AttachSSHIdentityToTerminalSession(_ context.Context, sessionID, sshIdentityID string) error {
+	r.attachedSessionID = sessionID
+	r.attachedIdentityID = sshIdentityID
+	return nil
+}
+
 func TestStartTerminalSessionLinksResolvedIdentity(t *testing.T) {
 	repo := &testSessionRepo{}
 	useCase := NewStartTerminalSessionUseCase(repo)
 
-	userID := "user-1"
 	sshIdentityID := "identity-1"
 	fingerprint := "SHA256:abc"
 	selectedAddressID := SelectedAddressIDUnsetPlaceholder
@@ -41,10 +48,7 @@ func TestStartTerminalSessionLinksResolvedIdentity(t *testing.T) {
 		SSHFingerprint:    &fingerprint,
 		CurrentScreen:     ScreenSSHSessionPlaceholder,
 		SelectedAddressID: &selectedAddressID,
-		ResolvedIdentity: &SessionIdentity{
-			User:        User{ID: userID},
-			SSHIdentity: SSHIdentity{ID: sshIdentityID},
-		},
+		ResolvedIdentity:  &SessionIdentity{SSHIdentity: SSHIdentity{ID: sshIdentityID}},
 	})
 	if err != nil {
 		t.Fatalf("start session: %v", err)
@@ -53,14 +57,27 @@ func TestStartTerminalSessionLinksResolvedIdentity(t *testing.T) {
 	if created.ID == "" {
 		t.Fatal("expected created session id")
 	}
-	if repo.created.UserID == nil || *repo.created.UserID != userID {
-		t.Fatalf("expected user_id %s", userID)
-	}
 	if repo.created.SSHIdentityID == nil || *repo.created.SSHIdentityID != sshIdentityID {
 		t.Fatalf("expected ssh_identity_id %s", sshIdentityID)
 	}
 	if repo.created.CurrentScreen != ScreenSSHSessionPlaceholder {
 		t.Fatalf("unexpected current screen: %s", repo.created.CurrentScreen)
+	}
+}
+
+func TestAttachSSHIdentityToTerminalSession(t *testing.T) {
+	repo := &testSessionRepo{}
+	useCase := NewAttachSSHIdentityToTerminalSessionUseCase(repo)
+
+	err := useCase.Execute(context.Background(), AttachSSHIdentityToTerminalSessionInput{
+		SessionID:     "session-1",
+		SSHIdentityID: "identity-1",
+	})
+	if err != nil {
+		t.Fatalf("attach identity: %v", err)
+	}
+	if repo.attachedSessionID != "session-1" || repo.attachedIdentityID != "identity-1" {
+		t.Fatalf("expected attach session-1/identity-1, got %s/%s", repo.attachedSessionID, repo.attachedIdentityID)
 	}
 }
 
@@ -79,9 +96,6 @@ func TestStartTerminalSessionAllowsGuestIdentity(t *testing.T) {
 		t.Fatalf("start guest session: %v", err)
 	}
 
-	if repo.created.UserID != nil {
-		t.Fatalf("guest session must not have user_id: %v", *repo.created.UserID)
-	}
 	if repo.created.SSHIdentityID != nil {
 		t.Fatalf("guest session must not have ssh_identity_id: %v", *repo.created.SSHIdentityID)
 	}

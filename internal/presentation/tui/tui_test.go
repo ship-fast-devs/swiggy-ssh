@@ -163,8 +163,8 @@ func TestHomeViewCentersInViewport(t *testing.T) {
 func TestInstamartPlaceholderViewUsesInput(t *testing.T) {
 	var buf bytes.Buffer
 	err := tui.InstamartPlaceholderView{
-		UserID: "user-1",
-		In:     strings.NewReader("q"),
+		SSHIdentityID: "identity-1",
+		In:            strings.NewReader("q"),
 	}.Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render: %v", err)
@@ -375,7 +375,7 @@ func TestInstamartViewRendersAddress(t *testing.T) {
 func TestInstamartPlaceholderViewDelegates(t *testing.T) {
 	ctx, cancel := renderCtx()
 	defer cancel()
-	v := tui.InstamartPlaceholderView{UserID: "user-1", StatusMessage: "Guest session connected"}
+	v := tui.InstamartPlaceholderView{SSHIdentityID: "identity-1", StatusMessage: "Guest session connected"}
 	var buf bytes.Buffer
 	_ = v.Render(ctx, &buf)
 	out := buf.String()

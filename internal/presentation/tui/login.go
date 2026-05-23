@@ -122,6 +122,7 @@ type loginSuccessModel struct {
 	choices  []string
 	name     string
 	email    string
+	message  string
 }
 
 func (m loginSuccessModel) Init() tea.Cmd {
@@ -152,23 +153,27 @@ func (m loginSuccessModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m loginSuccessModel) View() string {
 	var sb strings.Builder
 	sb.WriteString(top())
-	sb.WriteString(line(" " + brandStyle.Render("swiggy.ssh") + creamStyle.Render(" > Login")))
+	sb.WriteString(headerLine(" "+brandStyle.Render("swiggy.ssh")+creamStyle.Render(" > Login"), mutedStyle.Render("secure browser login")+" "))
 	sb.WriteString(divider())
 	sb.WriteString(line(""))
-	sb.WriteString(line(" " + successStyle.Render("✓ Swiggy account connected")))
+	sb.WriteString(centeredLine(successStyle.Render("✓ Swiggy account connected")))
+	sb.WriteString(centeredLine(creamStyle.Render(m.message)))
 	sb.WriteString(line(""))
-	sb.WriteString(line(" " + brandStyle.Render("Signed in as:") + " " + boldStyle.Render(m.name) + mutedStyle.Render("  <"+m.email+">")))
+	sb.WriteString(line("  " + mutedStyle.Render("┌─ Account ─────────────────────────────────────────────────────────────┐")))
+	sb.WriteString(line("  " + mutedStyle.Render("│") + " " + brandStyle.Render("Signed in") + "  " + boldStyle.Render(m.name)))
+	sb.WriteString(line("  " + mutedStyle.Render("│") + " " + brandStyle.Render("Email") + "      " + mutedStyle.Render(m.email)))
+	sb.WriteString(line("  " + mutedStyle.Render("└──────────────────────────────────────────────────────────────────────┘")))
 	sb.WriteString(line(""))
-	sb.WriteString(line(" " + creamStyle.Render("You can now search Instamart, manage your cart, and place COD orders.")))
+	sb.WriteString(line(" " + creamStyle.Render("Fresh auth is stored. Tokens are encrypted and never shown in the TUI.")))
 	sb.WriteString(line(""))
-	sb.WriteString(line(" " + brandStyle.Render("Continue to:")))
+	sb.WriteString(line(" " + brandStyle.Render("What next?")))
 	sb.WriteString(line(""))
 	for i, choice := range m.choices {
 		label := fmt.Sprintf("%d. %s", i+1, choice)
 		if m.cursor == i {
-			sb.WriteString(line(cursorStyle.Render("> ") + boldStyle.Render(label)))
+			sb.WriteString(line(" " + cursorStyle.Render("▸ ") + boldStyle.Render(label) + "  " + loginSuccessChoiceHint(choice)))
 		} else {
-			sb.WriteString(line("   " + label))
+			sb.WriteString(line("   " + label + "  " + loginSuccessChoiceHint(choice)))
 		}
 	}
 	sb.WriteString(line(""))
@@ -197,9 +202,34 @@ func (v LoginSuccessView) Render(ctx context.Context, w io.Writer) error {
 		choices:  loginSuccessChoices,
 		name:     name,
 		email:    email,
+		message:  loginSuccessMessage(v.IsFirstAuth, v.WasReauth),
 	}
 	_, err := runInteractive(m, w, v.In)
 	return err
+}
+
+func loginSuccessMessage(isFirstAuth, wasReauth bool) string {
+	switch {
+	case isFirstAuth:
+		return "Welcome! Your Swiggy account is linked to this SSH key."
+	case wasReauth:
+		return "You are back online with a freshly verified Swiggy session."
+	default:
+		return "Welcome back. Your saved Swiggy account is ready."
+	}
+}
+
+func loginSuccessChoiceHint(choice string) string {
+	switch choice {
+	case "Instamart":
+		return mutedStyle.Render("search groceries and build a cart")
+	case "Home":
+		return mutedStyle.Render("return to the command center")
+	case "Account settings":
+		return mutedStyle.Render("review linked account details")
+	default:
+		return ""
+	}
 }
 
 // ReconnectView renders the re-auth prompt shown before a new browser auth attempt.

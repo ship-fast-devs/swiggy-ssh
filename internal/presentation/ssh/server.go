@@ -37,6 +37,7 @@ type SSHServer struct {
 	resolver       *identity.ResolveSSHIdentityUseCase
 	registrar      *identity.RegisterSSHIdentityUseCase
 	startSession   *identity.StartTerminalSessionUseCase
+	attachSession  *identity.AttachSSHIdentityToTerminalSessionUseCase
 	endSession     *identity.EndTerminalSessionUseCase
 	authAttemptSvc auth.BrowserAuthAttemptService
 	publicBaseURL  string
@@ -93,7 +94,7 @@ func (t *activeConnTracker) closeAll() {
 	}
 }
 
-func New(addr, hostKeyPath string, logger *slog.Logger, resolver *identity.ResolveSSHIdentityUseCase, registrar *identity.RegisterSSHIdentityUseCase, startSession *identity.StartTerminalSessionUseCase, endSession *identity.EndTerminalSessionUseCase, authAttemptSvc auth.BrowserAuthAttemptService, publicBaseURL string, authUseCase *auth.EnsureValidAccountUseCase, instamartSvc *appinstamart.Service, foodSvc *appfood.Service) *SSHServer {
+func New(addr, hostKeyPath string, logger *slog.Logger, resolver *identity.ResolveSSHIdentityUseCase, registrar *identity.RegisterSSHIdentityUseCase, startSession *identity.StartTerminalSessionUseCase, attachSession *identity.AttachSSHIdentityToTerminalSessionUseCase, endSession *identity.EndTerminalSessionUseCase, authAttemptSvc auth.BrowserAuthAttemptService, publicBaseURL string, authUseCase *auth.EnsureValidAccountUseCase, instamartSvc *appinstamart.Service, foodSvc *appfood.Service) *SSHServer {
 	return &SSHServer{
 		addr:           addr,
 		hostKeyPath:    hostKeyPath,
@@ -101,6 +102,7 @@ func New(addr, hostKeyPath string, logger *slog.Logger, resolver *identity.Resol
 		resolver:       resolver,
 		registrar:      registrar,
 		startSession:   startSession,
+		attachSession:  attachSession,
 		endSession:     endSession,
 		authAttemptSvc: authAttemptSvc,
 		publicBaseURL:  publicBaseURL,
@@ -280,9 +282,9 @@ func (s *SSHServer) handleConn(ctx context.Context, netConn net.Conn, serverConf
 
 	go ssh.DiscardRequests(reqs)
 
-	var resolvedUserID string
+	var resolvedSSHIdentityID string
 	if resolvedIdentity != nil {
-		resolvedUserID = resolvedIdentity.User.ID
+		resolvedSSHIdentityID = resolvedIdentity.SSHIdentity.ID
 	}
 
 	for newChan := range chans {
@@ -297,11 +299,11 @@ func (s *SSHServer) handleConn(ctx context.Context, netConn net.Conn, serverConf
 			continue
 		}
 
-		go s.handleSessionChannel(ctx, sshConn, channel, requests, terminalSessionID, fingerprint, pubKeyType, publicKeyAuthorized, resolvedUserID)
+		go s.handleSessionChannel(ctx, sshConn, channel, requests, terminalSessionID, fingerprint, pubKeyType, publicKeyAuthorized, resolvedSSHIdentityID)
 	}
 }
 
-func (s *SSHServer) handleSessionChannel(ctx context.Context, conn *ssh.ServerConn, ch ssh.Channel, reqs <-chan *ssh.Request, terminalSessionID, fingerprint, pubKeyType, publicKeyAuthorized, resolvedUserID string) {
+func (s *SSHServer) handleSessionChannel(ctx context.Context, conn *ssh.ServerConn, ch ssh.Channel, reqs <-chan *ssh.Request, terminalSessionID, fingerprint, pubKeyType, publicKeyAuthorized, resolvedSSHIdentityID string) {
 	defer ch.Close()
 
 	started := false
@@ -340,7 +342,7 @@ func (s *SSHServer) handleSessionChannel(ctx context.Context, conn *ssh.ServerCo
 		fingerprint,
 	)
 
-	s.runSession(tui.WithViewport(ctx, viewport), ch, fallbackMsg, terminalSessionID, fingerprint, publicKeyAuthorized, resolvedUserID)
+	s.runSession(tui.WithViewport(ctx, viewport), ch, fallbackMsg, terminalSessionID, fingerprint, publicKeyAuthorized, resolvedSSHIdentityID)
 
 	_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{Status: 0}))
 
@@ -409,26 +411,32 @@ func discardSessionRequests(reqs <-chan *ssh.Request) {
 
 // runSession drives the screen routing logic for an established SSH session channel.
 // It is called after the request loop confirms a shell/exec was started.
-func (s *SSHServer) runSession(ctx context.Context, ch ssh.Channel, fallbackMsg, terminalSessionID, fingerprint, publicKeyAuthorized, resolvedUserID string) {
+func (s *SSHServer) runSession(ctx context.Context, ch ssh.Channel, fallbackMsg, terminalSessionID, fingerprint, publicKeyAuthorized, resolvedSSHIdentityID string) {
 	if s.authAttemptSvc == nil || terminalSessionID == "" {
 		_, _ = io.WriteString(ch, fallbackMsg)
 		_, _ = io.WriteString(ch, "Session handler placeholder complete. Goodbye.\n")
 		return
 	}
+	if err := tui.EnterFullscreen(ch); err != nil {
+		s.logger.WarnContext(ctx, "failed to enter fullscreen tui", "error", err)
+		return
+	}
+	defer func() { _ = tui.ExitFullscreen(ch) }()
+
 	render := func(renderCtx context.Context, view tui.View) {
 		_ = tui.ClearScreen(ch)
 		_ = view.Render(renderCtx, ch)
 	}
 
 	state := sessionAddressState{selectedIndex: -1, addressStatus: tui.HomeAddressRequired}
-	if s.authUseCase != nil && resolvedUserID != "" {
+	if s.authUseCase != nil && resolvedSSHIdentityID != "" {
 		_, fastErr := s.authUseCase.Execute(ctx, auth.EnsureValidAccountInput{
-			UserID:         resolvedUserID,
+			SSHIdentityID:  resolvedSSHIdentityID,
 			AllowFirstAuth: false,
 		})
 		if fastErr == nil {
 			state.authenticated = true
-			s.loadSessionAddresses(ctx, resolvedUserID, &state)
+			s.loadSessionAddresses(ctx, resolvedSSHIdentityID, &state)
 		}
 		if errors.Is(fastErr, auth.ErrAccountRevoked) {
 			render(ctx, tui.RevokedView{})
@@ -457,19 +465,19 @@ func (s *SSHServer) runSession(ctx context.Context, ch ssh.Channel, fallbackMsg,
 		case tui.HomeActionInstamart:
 			if !state.authenticated {
 				var ok bool
-				ok, resolvedUserID = s.authenticateSessionForApp(ctx, ch, render, terminalSessionID, fingerprint, publicKeyAuthorized, resolvedUserID)
+				ok, resolvedSSHIdentityID = s.authenticateSessionForApp(ctx, ch, render, terminalSessionID, fingerprint, publicKeyAuthorized, resolvedSSHIdentityID)
 				if !ok {
 					return
 				}
 				state.authenticated = true
-				s.loadSessionAddresses(ctx, resolvedUserID, &state)
+				s.loadSessionAddresses(ctx, resolvedSSHIdentityID, &state)
 			}
 			selectedAddress, ok := state.selectedAddress()
 			if !ok {
 				continue
 			}
 			_ = tui.ClearScreen(ch)
-			instamartResult, renderErr := (tui.InstamartAppView{Service: s.instamartSvc, UserID: resolvedUserID, Addresses: state.addresses, SelectedAddress: selectedAddress, In: ch}).RenderWithResult(ctx, ch)
+			instamartResult, renderErr := (tui.InstamartAppView{Service: s.instamartSvc, SSHIdentityID: resolvedSSHIdentityID, Addresses: state.addresses, SelectedAddress: selectedAddress, In: ch}).RenderWithResult(ctx, ch)
 			if renderErr != nil {
 				return
 			}
@@ -482,16 +490,16 @@ func (s *SSHServer) runSession(ctx context.Context, ch ssh.Channel, fallbackMsg,
 		case tui.HomeActionTrackOrders:
 			if !state.authenticated {
 				var ok bool
-				ok, resolvedUserID = s.authenticateSessionForApp(ctx, ch, render, terminalSessionID, fingerprint, publicKeyAuthorized, resolvedUserID)
+				ok, resolvedSSHIdentityID = s.authenticateSessionForApp(ctx, ch, render, terminalSessionID, fingerprint, publicKeyAuthorized, resolvedSSHIdentityID)
 				if !ok {
 					return
 				}
 				state.authenticated = true
-				s.loadSessionAddresses(ctx, resolvedUserID, &state)
+				s.loadSessionAddresses(ctx, resolvedSSHIdentityID, &state)
 			}
 			selectedAddress, _ := state.selectedAddress()
 			_ = tui.ClearScreen(ch)
-			instamartResult, renderErr := (tui.InstamartAppView{Service: s.instamartSvc, UserID: resolvedUserID, Addresses: state.addresses, SelectedAddress: selectedAddress, StartTracking: true, In: ch}).RenderWithResult(ctx, ch)
+			instamartResult, renderErr := (tui.InstamartAppView{Service: s.instamartSvc, SSHIdentityID: resolvedSSHIdentityID, Addresses: state.addresses, SelectedAddress: selectedAddress, StartTracking: true, In: ch}).RenderWithResult(ctx, ch)
 			if renderErr != nil {
 				return
 			}
@@ -504,12 +512,12 @@ func (s *SSHServer) runSession(ctx context.Context, ch ssh.Channel, fallbackMsg,
 		case tui.HomeActionFood:
 			if !state.authenticated {
 				var ok bool
-				ok, resolvedUserID = s.authenticateSessionForApp(ctx, ch, render, terminalSessionID, fingerprint, publicKeyAuthorized, resolvedUserID)
+				ok, resolvedSSHIdentityID = s.authenticateSessionForApp(ctx, ch, render, terminalSessionID, fingerprint, publicKeyAuthorized, resolvedSSHIdentityID)
 				if !ok {
 					return
 				}
 				state.authenticated = true
-				s.loadSessionAddresses(ctx, resolvedUserID, &state)
+				s.loadSessionAddresses(ctx, resolvedSSHIdentityID, &state)
 			}
 			selectedAddress, ok := state.selectedAddress()
 			if !ok {
@@ -517,7 +525,7 @@ func (s *SSHServer) runSession(ctx context.Context, ch ssh.Channel, fallbackMsg,
 			}
 			foodAddress := selectedAddressToFoodAddress(selectedAddress)
 			if s.foodSvc != nil {
-				foodAddresses, err := s.foodSvc.GetAddresses(domainauth.ContextWithUserID(ctx, resolvedUserID))
+				foodAddresses, err := s.foodSvc.GetAddresses(domainauth.ContextWithUserID(ctx, resolvedSSHIdentityID))
 				if err != nil {
 					s.logger.WarnContext(ctx, "food address load failed", "error", err)
 					render(ctx, tui.ErrorView{Message: "Food address lookup failed. Please reconnect and try again."})
@@ -534,7 +542,7 @@ func (s *SSHServer) runSession(ctx context.Context, ch ssh.Channel, fallbackMsg,
 			_ = tui.ClearScreen(ch)
 			foodResult, renderErr := (tui.FoodAppView{
 				Service:         s.foodSvc,
-				UserID:          resolvedUserID,
+				SSHIdentityID:   resolvedSSHIdentityID,
 				SelectedAddress: foodAddress,
 				In:              ch,
 			}).RenderWithResult(ctx, ch)
@@ -552,57 +560,56 @@ func (s *SSHServer) runSession(ctx context.Context, ch ssh.Channel, fallbackMsg,
 	}
 }
 
-func (s *SSHServer) authenticateSessionForApp(ctx context.Context, ch ssh.Channel, render func(context.Context, tui.View), terminalSessionID, fingerprint, publicKeyAuthorized, resolvedUserID string) (bool, string) {
+func (s *SSHServer) authenticateSessionForApp(ctx context.Context, ch ssh.Channel, render func(context.Context, tui.View), terminalSessionID, fingerprint, publicKeyAuthorized, resolvedSSHIdentityID string) (bool, string) {
 	// BROWSER AUTH ATTEMPT FLOW
-
-	durableUserID, identityErr := s.ensureDurableUserForBrowserAuth(ctx, resolvedUserID, publicKeyAuthorized)
+	durableSSHIdentityID, identityErr := s.establishDurableSSHIdentityForBrowserAuth(ctx, resolvedSSHIdentityID, publicKeyAuthorized, terminalSessionID)
 	if identityErr != nil {
 		s.logger.WarnContext(ctx, "failed to establish durable ssh identity", "error", identityErr, "pubkey_fingerprint", fingerprint)
-		if errors.Is(identityErr, auth.ErrOAuthAccountUserRequired) || errors.Is(identityErr, identity.ErrMissingSSHPublicKey) {
+		if errors.Is(identityErr, auth.ErrSSHIdentityRequired) || errors.Is(identityErr, identity.ErrMissingSSHPublicKey) {
 			render(ctx, tui.ErrorView{Message: "Browser login needs an SSH public key. Reconnect with an SSH key and try again."})
-			return false, resolvedUserID
+			return false, resolvedSSHIdentityID
 		}
 		render(ctx, tui.ErrorView{Message: "Login unavailable. Please try again later."})
-		return false, resolvedUserID
+		return false, resolvedSSHIdentityID
 	}
-	resolvedUserID = durableUserID
+	resolvedSSHIdentityID = durableSSHIdentityID
 
-	authRequired, issueErr := s.beginBrowserAuth(ctx, resolvedUserID, terminalSessionID)
+	authRequired, issueErr := s.beginBrowserAuth(ctx, resolvedSSHIdentityID, terminalSessionID)
 	if issueErr != nil {
 		s.logger.WarnContext(ctx, "failed to issue auth attempt", "error", issueErr)
-		if errors.Is(issueErr, auth.ErrOAuthAccountUserRequired) {
+		if errors.Is(issueErr, auth.ErrSSHIdentityRequired) {
 			render(ctx, tui.ErrorView{Message: "Browser login needs an SSH public key. Reconnect with an SSH key and try again."})
-			return false, resolvedUserID
+			return false, resolvedSSHIdentityID
 		}
 		render(ctx, tui.ErrorView{Message: "Login unavailable. Please try again later."})
-		return false, resolvedUserID
+		return false, resolvedSSHIdentityID
 	}
 	if !authRequired.AuthRequired {
 		render(ctx, tui.ErrorView{Message: "Login unavailable. Please try again later."})
-		return false, resolvedUserID
+		return false, resolvedSSHIdentityID
 	}
 	completed, pollErr := s.renderLoginWaitingAndPoll(ctx, ch, authRequired.LoginURL, authRequired.AuthAttemptToken)
 	if pollErr != nil {
 		render(ctx, tui.ErrorView{Message: "Login polling error. Session ending."})
-		return false, resolvedUserID
+		return false, resolvedSSHIdentityID
 	}
 	if !completed {
 		render(ctx, tui.ErrorView{Message: "Login expired or cancelled. Please reconnect."})
-		return false, resolvedUserID
+		return false, resolvedSSHIdentityID
 	}
 
 	// Login confirmed — check/establish account.
-	if resolvedUserID == "" {
+	if resolvedSSHIdentityID == "" {
 		render(ctx, tui.InstamartPlaceholderView{StatusMessage: "Guest session connected for this SSH session.", In: ch})
-		return false, resolvedUserID
+		return false, resolvedSSHIdentityID
 	}
 	if s.authUseCase == nil {
 		render(ctx, tui.LoginSuccessView{In: ch})
-		return true, resolvedUserID
+		return true, resolvedSSHIdentityID
 	}
 
 	reauthFn := func(reauthCtx context.Context) error {
-		newAttempt, _, reauthIssueErr := s.authAttemptSvc.IssueAuthAttempt(reauthCtx, resolvedUserID, terminalSessionID)
+		newAttempt, _, reauthIssueErr := s.authAttemptSvc.IssueAuthAttempt(reauthCtx, resolvedSSHIdentityID, terminalSessionID)
 		if reauthIssueErr != nil {
 			return fmt.Errorf("issue reauth auth attempt: %w", reauthIssueErr)
 		}
@@ -618,18 +625,18 @@ func (s *SSHServer) authenticateSessionForApp(ctx context.Context, ch ssh.Channe
 	}
 
 	result, authErr := s.authUseCase.Execute(ctx, auth.EnsureValidAccountInput{
-		UserID:         resolvedUserID,
+		SSHIdentityID:  resolvedSSHIdentityID,
 		AllowFirstAuth: true,
 		Reauth:         reauthFn,
 	})
 	switch {
 	case errors.Is(authErr, auth.ErrAccountRevoked):
 		render(ctx, tui.RevokedView{})
-		return false, resolvedUserID
+		return false, resolvedSSHIdentityID
 	case authErr != nil:
 		s.logger.WarnContext(ctx, "ensure valid account failed", "error", authErr)
 		render(ctx, tui.ErrorView{Message: "Auth check failed. Please reconnect."})
-		return false, resolvedUserID
+		return false, resolvedSSHIdentityID
 	default:
 		render(ctx, tui.LoginSuccessView{
 			IsFirstAuth: result.IsFirstAuth,
@@ -637,20 +644,20 @@ func (s *SSHServer) authenticateSessionForApp(ctx context.Context, ch ssh.Channe
 			Account:     result.Account,
 			In:          ch,
 		})
-		return true, resolvedUserID
+		return true, resolvedSSHIdentityID
 	}
-	return false, resolvedUserID
+	return false, resolvedSSHIdentityID
 }
 
-func (s *SSHServer) loadSessionAddresses(ctx context.Context, userID string, state *sessionAddressState) {
+func (s *SSHServer) loadSessionAddresses(ctx context.Context, sshIdentityID string, state *sessionAddressState) {
 	if state == nil || !state.authenticated {
 		return
 	}
-	if s.instamartSvc == nil || userID == "" {
+	if s.instamartSvc == nil || sshIdentityID == "" {
 		state.addressStatus = tui.HomeAddressUnavailable
 		return
 	}
-	addresses, err := s.instamartSvc.GetAddresses(domainauth.ContextWithUserID(ctx, userID))
+	addresses, err := s.instamartSvc.GetAddresses(domainauth.ContextWithUserID(ctx, sshIdentityID))
 	if err != nil {
 		s.logger.WarnContext(ctx, "session address load failed", "error", err)
 		state.addresses = nil
@@ -769,8 +776,14 @@ func (s *SSHServer) renderLoginWaitingAndPoll(ctx context.Context, ch ssh.Channe
 
 	completed, pollErr := pollAuthAttempt(ctx, s.authAttemptSvc, rawAttempt, s.logger)
 	cancelRender()
-	if renderErr := <-renderDone; renderErr != nil {
-		s.logger.WarnContext(ctx, "login waiting render failed", "error", renderErr)
+	select {
+	case renderErr := <-renderDone:
+		if renderErr != nil {
+			s.logger.WarnContext(ctx, "login waiting render failed", "error", renderErr)
+		}
+	case <-time.After(200 * time.Millisecond):
+		// Do not hold auth completion on terminal input cleanup; the SSH channel
+		// will be closed when the session ends if the renderer is still unwinding.
 	}
 
 	return completed, pollErr
@@ -780,12 +793,12 @@ func authStartURL(publicBaseURL, rawAttempt string) string {
 	return publicBaseURL + "/auth/start?attempt=" + url.QueryEscape(rawAttempt)
 }
 
-func (s *SSHServer) ensureDurableUserForBrowserAuth(ctx context.Context, resolvedUserID, publicKeyAuthorized string) (string, error) {
-	if resolvedUserID != "" {
-		return resolvedUserID, nil
+func (s *SSHServer) ensureDurableSSHIdentityForBrowserAuth(ctx context.Context, resolvedSSHIdentityID, publicKeyAuthorized string) (string, error) {
+	if resolvedSSHIdentityID != "" {
+		return resolvedSSHIdentityID, nil
 	}
 	if publicKeyAuthorized == "" || s.registrar == nil {
-		return "", auth.ErrOAuthAccountUserRequired
+		return "", auth.ErrSSHIdentityRequired
 	}
 	publicKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(publicKeyAuthorized))
 	if err != nil {
@@ -798,23 +811,42 @@ func (s *SSHServer) ensureDurableUserForBrowserAuth(ctx context.Context, resolve
 	if err != nil {
 		return "", err
 	}
-	return registered.User.ID, nil
+	return registered.SSHIdentity.ID, nil
 }
 
-func (s *SSHServer) beginBrowserAuth(ctx context.Context, userID, terminalSessionID string) (auth.EnsureValidAccountOutput, error) {
-	if userID == "" {
-		return auth.EnsureValidAccountOutput{}, auth.ErrOAuthAccountUserRequired
+func (s *SSHServer) establishDurableSSHIdentityForBrowserAuth(ctx context.Context, resolvedSSHIdentityID, publicKeyAuthorized, terminalSessionID string) (string, error) {
+	sshIdentityID, err := s.ensureDurableSSHIdentityForBrowserAuth(ctx, resolvedSSHIdentityID, publicKeyAuthorized)
+	if err != nil {
+		return "", err
+	}
+	if s.attachSession != nil && terminalSessionID != "" {
+		if err := s.attachSession.Execute(ctx, identity.AttachSSHIdentityToTerminalSessionInput{SessionID: terminalSessionID, SSHIdentityID: sshIdentityID}); err != nil {
+			// Log attach failure but don't fail the auth flow — the SSH identity
+			// was already durably created, and session tracking is non-critical.
+			s.logger.WarnContext(ctx, "failed to attach ssh identity to terminal session",
+				"ssh_identity_id", sshIdentityID,
+				"terminal_session_id", terminalSessionID,
+				"error", err,
+			)
+		}
+	}
+	return sshIdentityID, nil
+}
+
+func (s *SSHServer) beginBrowserAuth(ctx context.Context, sshIdentityID, terminalSessionID string) (auth.EnsureValidAccountOutput, error) {
+	if sshIdentityID == "" {
+		return auth.EnsureValidAccountOutput{}, auth.ErrSSHIdentityRequired
 	}
 	if s.authUseCase != nil {
 		return s.authUseCase.Execute(ctx, auth.EnsureValidAccountInput{
-			UserID:             userID,
+			SSHIdentityID:      sshIdentityID,
 			AllowFirstAuth:     true,
 			AuthAttemptService: s.authAttemptSvc,
 			TerminalSessionID:  terminalSessionID,
 			PublicBaseURL:      s.publicBaseURL,
 		})
 	}
-	rawAttempt, _, err := s.authAttemptSvc.IssueAuthAttempt(ctx, userID, terminalSessionID)
+	rawAttempt, _, err := s.authAttemptSvc.IssueAuthAttempt(ctx, sshIdentityID, terminalSessionID)
 	if err != nil {
 		return auth.EnsureValidAccountOutput{}, err
 	}

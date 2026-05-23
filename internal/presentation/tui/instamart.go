@@ -20,14 +20,14 @@ const (
 // InstamartPlaceholderView remains for unauthenticated/legacy fallback paths.
 // Successful authenticated sessions use InstamartAppView instead.
 type InstamartPlaceholderView struct {
-	UserID        string
+	SSHIdentityID string
 	StatusMessage string
 	In            io.Reader
 }
 
 func (v InstamartPlaceholderView) Render(ctx context.Context, w io.Writer) error {
 	return instamartflow.InstamartPlaceholderView{
-		UserID:        v.UserID,
+		UserID:        v.SSHIdentityID,
 		StatusMessage: v.StatusMessage,
 		Viewport:      instamartViewport(ctx),
 		In:            v.In,
@@ -58,7 +58,7 @@ func (v InstamartView) Render(ctx context.Context, w io.Writer) error {
 // InstamartAppView renders the service-backed Instamart flow.
 type InstamartAppView struct {
 	Service         InstamartService
-	UserID          string
+	SSHIdentityID   string
 	Addresses       []domaininstamart.Address
 	SelectedAddress domaininstamart.Address
 	StartTracking   bool
@@ -74,7 +74,7 @@ func (v InstamartAppView) Render(ctx context.Context, w io.Writer) error {
 func (v InstamartAppView) RenderWithResult(ctx context.Context, w io.Writer) (InstamartResult, error) {
 	return instamartflow.InstamartAppView{
 		Service:         v.Service,
-		UserID:          v.UserID,
+		UserID:          v.SSHIdentityID,
 		Addresses:       v.Addresses,
 		SelectedAddress: v.SelectedAddress,
 		StartTracking:   v.StartTracking,

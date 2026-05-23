@@ -103,8 +103,9 @@ func main() {
 	resolveSSHIdentity := identity.NewResolveSSHIdentityUseCase(postgresStore)
 	registerSSHIdentity := identity.NewRegisterSSHIdentityUseCase(postgresStore)
 	startTerminalSession := identity.NewStartTerminalSessionUseCase(postgresStore)
+	attachTerminalSession := identity.NewAttachSSHIdentityToTerminalSessionUseCase(postgresStore)
 	endTerminalSession := identity.NewEndTerminalSessionUseCase(postgresStore)
-	server := sshserver.New(cfg.SSHAddr, cfg.SSHHostKeyPath, logger, resolveSSHIdentity, registerSSHIdentity, startTerminalSession, endTerminalSession, authAttemptSvc, cfg.PublicBaseURL, ensureValidAccount, instamartService, foodService)
+	server := sshserver.New(cfg.SSHAddr, cfg.SSHHostKeyPath, logger, resolveSSHIdentity, registerSSHIdentity, startTerminalSession, attachTerminalSession, endTerminalSession, authAttemptSvc, cfg.PublicBaseURL, ensureValidAccount, instamartService, foodService)
 	httpSrv := httpserver.New(cfg.HTTPAddr, logger, authAttemptSvc, completeBrowserAuth, startBrowserAuth, cfg.PublicBaseURL, cfg.SwiggyProvider)
 
 	logger.InfoContext(ctx, "swiggy-ssh scaffold startup",

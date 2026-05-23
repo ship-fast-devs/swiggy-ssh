@@ -30,7 +30,7 @@ type authAttemptRecord struct {
 	TokenHash         string    `json:"token_hash"`
 	CodeHash          string    `json:"code_hash,omitempty"`
 	CodeVerifier      string    `json:"code_verifier,omitempty"`
-	UserID            string    `json:"user_id"`
+	SSHIdentityID     string    `json:"ssh_identity_id"`
 	TerminalSessionID string    `json:"terminal_session_id"`
 	Status            string    `json:"status"`
 	ExpiresAt         time.Time `json:"expires_at"`
@@ -66,7 +66,7 @@ func generateRawAttemptToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-func (s *RedisLoginCodeService) IssueAuthAttempt(ctx context.Context, userID, terminalSessionID string) (string, auth.BrowserAuthAttempt, error) {
+func (s *RedisLoginCodeService) IssueAuthAttempt(ctx context.Context, sshIdentityID, terminalSessionID string) (string, auth.BrowserAuthAttempt, error) {
 	rawToken, err := generateRawAttemptToken()
 	if err != nil {
 		return "", auth.BrowserAuthAttempt{}, err
@@ -82,7 +82,7 @@ func (s *RedisLoginCodeService) IssueAuthAttempt(ctx context.Context, userID, te
 		TokenHash:         tokenHash,
 		CodeHash:          tokenHash,
 		CodeVerifier:      codeVerifier,
-		UserID:            userID,
+		SSHIdentityID:     sshIdentityID,
 		TerminalSessionID: terminalSessionID,
 		Status:            auth.AuthAttemptStatusPending,
 		ExpiresAt:         now.Add(s.ttl),
@@ -246,7 +246,7 @@ func toAuthAttempt(r authAttemptRecord) auth.BrowserAuthAttempt {
 		TokenHash:         r.TokenHash,
 		CodeHash:          r.TokenHash,
 		CodeVerifier:      r.CodeVerifier,
-		UserID:            r.UserID,
+		SSHIdentityID:     r.SSHIdentityID,
 		TerminalSessionID: r.TerminalSessionID,
 		Status:            r.Status,
 		ExpiresAt:         r.ExpiresAt,
@@ -254,8 +254,8 @@ func toAuthAttempt(r authAttemptRecord) auth.BrowserAuthAttempt {
 	}
 }
 
-func (s *RedisLoginCodeService) IssueLoginCode(ctx context.Context, userID, terminalSessionID string) (string, auth.LoginCode, error) {
-	return s.IssueAuthAttempt(ctx, userID, terminalSessionID)
+func (s *RedisLoginCodeService) IssueLoginCode(ctx context.Context, sshIdentityID, terminalSessionID string) (string, auth.LoginCode, error) {
+	return s.IssueAuthAttempt(ctx, sshIdentityID, terminalSessionID)
 }
 
 func (s *RedisLoginCodeService) GetLoginCode(ctx context.Context, rawCode string) (auth.LoginCode, error) {

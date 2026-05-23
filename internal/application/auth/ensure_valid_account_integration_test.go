@@ -10,7 +10,7 @@ import (
 )
 
 // repoKey is the composite key for the in-memory auth repo.
-type repoKey struct{ userID, provider string }
+type repoKey struct{ sshIdentityID, provider string }
 
 // intAuthRepo is a simple in-memory repository for integration testing.
 type intAuthRepo struct {
@@ -22,27 +22,27 @@ func newIntAuthRepo() *intAuthRepo {
 }
 
 func (r *intAuthRepo) UpsertOAuthAccount(_ context.Context, a auth.OAuthAccount) (auth.OAuthAccount, error) {
-	if a.UserID == "" {
-		return auth.OAuthAccount{}, errors.New("upsert: userID required")
+	if a.SSHIdentityID == "" {
+		return auth.OAuthAccount{}, errors.New("upsert: sshIdentityID required")
 	}
-	r.accounts[repoKey{a.UserID, a.Provider}] = a
+	r.accounts[repoKey{a.SSHIdentityID, a.Provider}] = a
 	return a, nil
 }
 
-func (r *intAuthRepo) FindOAuthAccountByUserAndProvider(_ context.Context, userID, provider string) (auth.OAuthAccount, error) {
-	a, ok := r.accounts[repoKey{userID, provider}]
+func (r *intAuthRepo) FindOAuthAccountBySSHIdentityAndProvider(_ context.Context, sshIdentityID, provider string) (auth.OAuthAccount, error) {
+	a, ok := r.accounts[repoKey{sshIdentityID, provider}]
 	if !ok {
 		return auth.OAuthAccount{}, auth.ErrOAuthAccountNotFound
 	}
 	return a, nil
 }
 
-func TestAuthIntegrationFirstTimeUser(t *testing.T) {
+func TestAuthIntegrationFirstTimeIdentity(t *testing.T) {
 	repo := newIntAuthRepo()
 	useCase := auth.NewEnsureValidAccountUseCase(repo)
 
 	result, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{
-		UserID:         "user-new",
+		SSHIdentityID:  "identity-new",
 		AllowFirstAuth: true,
 	})
 	if err != nil {
@@ -55,7 +55,7 @@ func TestAuthIntegrationFirstTimeUser(t *testing.T) {
 		t.Fatalf("expected active, got %s", result.Account.Status)
 	}
 	// Account persisted
-	found, err := repo.FindOAuthAccountByUserAndProvider(context.Background(), "user-new", auth.MockProvider)
+	found, err := repo.FindOAuthAccountBySSHIdentityAndProvider(context.Background(), "identity-new", auth.MockProvider)
 	if err != nil {
 		t.Fatalf("find after first auth: %v", err)
 	}
@@ -64,14 +64,14 @@ func TestAuthIntegrationFirstTimeUser(t *testing.T) {
 	}
 }
 
-func TestAuthIntegrationReturningValidUser(t *testing.T) {
+func TestAuthIntegrationReturningValidIdentity(t *testing.T) {
 	repo := newIntAuthRepo()
 	useCase := auth.NewEnsureValidAccountUseCase(repo)
 
 	// Seed a valid account
 	future := time.Now().UTC().Add(2 * time.Hour)
-	repo.accounts[repoKey{"user-returning", auth.MockProvider}] = auth.OAuthAccount{
-		UserID:         "user-returning",
+	repo.accounts[repoKey{"identity-returning", auth.MockProvider}] = auth.OAuthAccount{
+		SSHIdentityID:  "identity-returning",
 		Provider:       auth.MockProvider,
 		Status:         auth.OAuthAccountStatusActive,
 		AccessToken:    "valid-token",
@@ -79,7 +79,7 @@ func TestAuthIntegrationReturningValidUser(t *testing.T) {
 	}
 
 	reauthCalled := false
-	result, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{UserID: "user-returning", Reauth: func(_ context.Context) error {
+	result, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{SSHIdentityID: "identity-returning", Reauth: func(_ context.Context) error {
 		reauthCalled = true
 		return nil
 	}})
@@ -100,8 +100,8 @@ func TestAuthIntegrationExpiredUserReauth(t *testing.T) {
 
 	// Seed expired account
 	past := time.Now().UTC().Add(-1 * time.Hour)
-	repo.accounts[repoKey{"user-expired", auth.MockProvider}] = auth.OAuthAccount{
-		UserID:         "user-expired",
+	repo.accounts[repoKey{"identity-expired", auth.MockProvider}] = auth.OAuthAccount{
+		SSHIdentityID:  "identity-expired",
 		Provider:       auth.MockProvider,
 		Status:         auth.OAuthAccountStatusActive,
 		AccessToken:    "expired-token",
@@ -109,7 +109,7 @@ func TestAuthIntegrationExpiredUserReauth(t *testing.T) {
 	}
 
 	reauthCount := 0
-	result, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{UserID: "user-expired", Reauth: func(_ context.Context) error {
+	result, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{SSHIdentityID: "identity-expired", Reauth: func(_ context.Context) error {
 		reauthCount++
 		return nil
 	}})
@@ -126,7 +126,7 @@ func TestAuthIntegrationExpiredUserReauth(t *testing.T) {
 		t.Fatalf("expected active after reauth, got %s", result.Account.Status)
 	}
 	// Token refreshed in repo
-	found, _ := repo.FindOAuthAccountByUserAndProvider(context.Background(), "user-expired", auth.MockProvider)
+	found, _ := repo.FindOAuthAccountBySSHIdentityAndProvider(context.Background(), "identity-expired", auth.MockProvider)
 	if found.TokenExpiresAt == nil || found.TokenExpiresAt.Before(time.Now().UTC()) {
 		t.Fatal("expected refreshed future expiry in repo")
 	}
@@ -138,8 +138,8 @@ func TestAuthIntegrationReconnectRequiredReauth(t *testing.T) {
 
 	// Seed account with reconnect_required status (token not wall-clock expired)
 	future := time.Now().UTC().Add(2 * time.Hour)
-	repo.accounts[repoKey{"user-reconnect", auth.MockProvider}] = auth.OAuthAccount{
-		UserID:         "user-reconnect",
+	repo.accounts[repoKey{"identity-reconnect", auth.MockProvider}] = auth.OAuthAccount{
+		SSHIdentityID:  "identity-reconnect",
 		Provider:       auth.MockProvider,
 		Status:         auth.OAuthAccountStatusReconnectRequired,
 		AccessToken:    "stale-token",
@@ -147,7 +147,7 @@ func TestAuthIntegrationReconnectRequiredReauth(t *testing.T) {
 	}
 
 	reauthCount := 0
-	result, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{UserID: "user-reconnect", Reauth: func(_ context.Context) error {
+	result, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{SSHIdentityID: "identity-reconnect", Reauth: func(_ context.Context) error {
 		reauthCount++
 		return nil
 	}})
@@ -169,14 +169,14 @@ func TestAuthIntegrationRevokedUserBlocked(t *testing.T) {
 	repo := newIntAuthRepo()
 	useCase := auth.NewEnsureValidAccountUseCase(repo)
 
-	repo.accounts[repoKey{"user-revoked", auth.MockProvider}] = auth.OAuthAccount{
-		UserID:      "user-revoked",
-		Provider:    auth.MockProvider,
-		Status:      auth.OAuthAccountStatusRevoked,
-		AccessToken: "revoked-token",
+	repo.accounts[repoKey{"identity-revoked", auth.MockProvider}] = auth.OAuthAccount{
+		SSHIdentityID: "identity-revoked",
+		Provider:      auth.MockProvider,
+		Status:        auth.OAuthAccountStatusRevoked,
+		AccessToken:   "revoked-token",
 	}
 
-	_, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{UserID: "user-revoked", Reauth: func(_ context.Context) error {
+	_, err := useCase.Execute(context.Background(), auth.EnsureValidAccountInput{SSHIdentityID: "identity-revoked", Reauth: func(_ context.Context) error {
 		t.Fatal("reauth must not be called for revoked account")
 		return nil
 	}})

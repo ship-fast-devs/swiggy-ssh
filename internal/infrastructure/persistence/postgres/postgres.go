@@ -39,72 +39,20 @@ func (s *PostgresStore) Ping(ctx context.Context) error {
 	return s.pool.Ping(ctx)
 }
 
-func (s *PostgresStore) CreateUser(ctx context.Context, user identity.User) (identity.User, error) {
-	if user.ID == "" {
-		user.ID = uuid.NewString()
-	}
-
-	row := s.pool.QueryRow(ctx, `
-		INSERT INTO users (id, display_name, email, last_seen_at)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, display_name, email, created_at, last_seen_at
-	`, user.ID, user.DisplayName, user.Email, user.LastSeenAt)
-
-	created := identity.User{}
-	if err := row.Scan(&created.ID, &created.DisplayName, &created.Email, &created.CreatedAt, &created.LastSeenAt); err != nil {
-		return identity.User{}, err
-	}
-
-	return created, nil
-}
-
-func (s *PostgresStore) FindUserByID(ctx context.Context, userID string) (identity.User, error) {
-	row := s.pool.QueryRow(ctx, `
-		SELECT id, display_name, email, created_at, last_seen_at
-		FROM users
-		WHERE id = $1
-	`, userID)
-
-	user := identity.User{}
-	if err := row.Scan(&user.ID, &user.DisplayName, &user.Email, &user.CreatedAt, &user.LastSeenAt); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return identity.User{}, ErrNotFound
-		}
-
-		return identity.User{}, err
-	}
-
-	return user, nil
-}
-
-func (s *PostgresStore) UpdateUserLastSeen(ctx context.Context, userID string, lastSeenAt time.Time) error {
-	result, err := s.pool.Exec(ctx, `UPDATE users SET last_seen_at = $2 WHERE id = $1`, userID, lastSeenAt)
-	if err != nil {
-		return err
-	}
-
-	if result.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-
-	return nil
-}
-
 func (s *PostgresStore) CreateSSHIdentity(ctx context.Context, sshIdentity identity.SSHIdentity) (identity.SSHIdentity, error) {
 	if sshIdentity.ID == "" {
 		sshIdentity.ID = uuid.NewString()
 	}
 
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO ssh_identities (id, user_id, public_key_fingerprint, public_key, label, last_seen_at, revoked_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id, user_id, public_key_fingerprint, public_key, label, first_seen_at, last_seen_at, revoked_at
-	`, sshIdentity.ID, sshIdentity.UserID, sshIdentity.PublicKeyFingerprint, sshIdentity.PublicKey, sshIdentity.Label, sshIdentity.LastSeenAt, sshIdentity.RevokedAt)
+		INSERT INTO ssh_identities (id, public_key_fingerprint, public_key, label, last_seen_at, revoked_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, public_key_fingerprint, public_key, label, first_seen_at, last_seen_at, revoked_at
+	`, sshIdentity.ID, sshIdentity.PublicKeyFingerprint, sshIdentity.PublicKey, sshIdentity.Label, sshIdentity.LastSeenAt, sshIdentity.RevokedAt)
 
 	created := identity.SSHIdentity{}
 	if err := row.Scan(
 		&created.ID,
-		&created.UserID,
 		&created.PublicKeyFingerprint,
 		&created.PublicKey,
 		&created.Label,
@@ -112,71 +60,13 @@ func (s *PostgresStore) CreateSSHIdentity(ctx context.Context, sshIdentity ident
 		&created.LastSeenAt,
 		&created.RevokedAt,
 	); err != nil {
+		if isSSHFingerprintUniqueViolation(err) {
+			return identity.SSHIdentity{}, identity.ErrSSHIdentityAlreadyExists
+		}
 		return identity.SSHIdentity{}, err
 	}
 
 	return created, nil
-}
-
-func (s *PostgresStore) CreateUserWithSSHIdentity(ctx context.Context, user identity.User, sshIdentity identity.SSHIdentity) (identity.User, identity.SSHIdentity, error) {
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return identity.User{}, identity.SSHIdentity{}, err
-	}
-
-	defer func() {
-		_ = tx.Rollback(ctx)
-	}()
-
-	if user.ID == "" {
-		user.ID = uuid.NewString()
-	}
-
-	userRow := tx.QueryRow(ctx, `
-		INSERT INTO users (id, display_name, email, last_seen_at)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, display_name, email, created_at, last_seen_at
-	`, user.ID, user.DisplayName, user.Email, user.LastSeenAt)
-
-	createdUser := identity.User{}
-	if err := userRow.Scan(&createdUser.ID, &createdUser.DisplayName, &createdUser.Email, &createdUser.CreatedAt, &createdUser.LastSeenAt); err != nil {
-		return identity.User{}, identity.SSHIdentity{}, err
-	}
-
-	if sshIdentity.ID == "" {
-		sshIdentity.ID = uuid.NewString()
-	}
-	sshIdentity.UserID = createdUser.ID
-
-	identityRow := tx.QueryRow(ctx, `
-		INSERT INTO ssh_identities (id, user_id, public_key_fingerprint, public_key, label, last_seen_at, revoked_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id, user_id, public_key_fingerprint, public_key, label, first_seen_at, last_seen_at, revoked_at
-	`, sshIdentity.ID, sshIdentity.UserID, sshIdentity.PublicKeyFingerprint, sshIdentity.PublicKey, sshIdentity.Label, sshIdentity.LastSeenAt, sshIdentity.RevokedAt)
-
-	createdIdentity := identity.SSHIdentity{}
-	if err := identityRow.Scan(
-		&createdIdentity.ID,
-		&createdIdentity.UserID,
-		&createdIdentity.PublicKeyFingerprint,
-		&createdIdentity.PublicKey,
-		&createdIdentity.Label,
-		&createdIdentity.FirstSeenAt,
-		&createdIdentity.LastSeenAt,
-		&createdIdentity.RevokedAt,
-	); err != nil {
-		if isSSHFingerprintUniqueViolation(err) {
-			return identity.User{}, identity.SSHIdentity{}, identity.ErrSSHIdentityAlreadyExists
-		}
-
-		return identity.User{}, identity.SSHIdentity{}, err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return identity.User{}, identity.SSHIdentity{}, err
-	}
-
-	return createdUser, createdIdentity, nil
 }
 
 func isSSHFingerprintUniqueViolation(err error) bool {
@@ -190,7 +80,7 @@ func isSSHFingerprintUniqueViolation(err error) bool {
 
 func (s *PostgresStore) FindSSHIdentityByFingerprint(ctx context.Context, fingerprint string) (identity.SSHIdentity, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, user_id, public_key_fingerprint, public_key, label, first_seen_at, last_seen_at, revoked_at
+		SELECT id, public_key_fingerprint, public_key, label, first_seen_at, last_seen_at, revoked_at
 		FROM ssh_identities
 		WHERE public_key_fingerprint = $1
 	`, fingerprint)
@@ -198,7 +88,6 @@ func (s *PostgresStore) FindSSHIdentityByFingerprint(ctx context.Context, finger
 	sshIdentity := identity.SSHIdentity{}
 	if err := row.Scan(
 		&sshIdentity.ID,
-		&sshIdentity.UserID,
 		&sshIdentity.PublicKeyFingerprint,
 		&sshIdentity.PublicKey,
 		&sshIdentity.Label,
@@ -242,7 +131,7 @@ func (s *PostgresStore) UpsertOAuthAccount(ctx context.Context, account auth.OAu
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO oauth_accounts (
 			id,
-			user_id,
+			ssh_identity_id,
 			provider,
 			provider_user_id,
 			encrypted_access_token,
@@ -251,7 +140,7 @@ func (s *PostgresStore) UpsertOAuthAccount(ctx context.Context, account auth.OAu
 			status
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		ON CONFLICT (user_id, provider)
+		ON CONFLICT (ssh_identity_id, provider)
 		DO UPDATE SET
 			provider_user_id = EXCLUDED.provider_user_id,
 			encrypted_access_token = EXCLUDED.encrypted_access_token,
@@ -259,10 +148,10 @@ func (s *PostgresStore) UpsertOAuthAccount(ctx context.Context, account auth.OAu
 			scopes = EXCLUDED.scopes,
 			status = EXCLUDED.status,
 			updated_at = now()
-		RETURNING id, user_id, provider, provider_user_id, encrypted_access_token, token_expires_at, scopes, status, created_at, updated_at
+		RETURNING id, ssh_identity_id, provider, provider_user_id, encrypted_access_token, token_expires_at, scopes, status, created_at, updated_at
 	`,
 		account.ID,
-		account.UserID,
+		account.SSHIdentityID,
 		account.Provider,
 		account.ProviderUserID,
 		encryptedToken,
@@ -276,7 +165,7 @@ func (s *PostgresStore) UpsertOAuthAccount(ctx context.Context, account auth.OAu
 	var upsertedEncryptedToken string
 	if err := row.Scan(
 		&upserted.ID,
-		&upserted.UserID,
+		&upserted.SSHIdentityID,
 		&upserted.Provider,
 		&upserted.ProviderUserID,
 		&upsertedEncryptedToken,
@@ -305,15 +194,14 @@ func (s *PostgresStore) CreateTerminalSession(ctx context.Context, session ident
 	}
 
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO terminal_sessions (id, user_id, ssh_identity_id, ssh_fingerprint, client, client_session_id, current_screen, selected_address_id, last_seen_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
-		RETURNING id, user_id, ssh_identity_id, ssh_fingerprint, client, client_session_id, current_screen, selected_address_id, created_at, last_seen_at, ended_at
-	`, session.ID, session.UserID, session.SSHIdentityID, session.SSHFingerprint, session.Client, session.ClientSessionID, session.CurrentScreen, session.SelectedAddressID)
+		INSERT INTO terminal_sessions (id, ssh_identity_id, ssh_fingerprint, client, client_session_id, current_screen, selected_address_id, last_seen_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+		RETURNING id, ssh_identity_id, ssh_fingerprint, client, client_session_id, current_screen, selected_address_id, created_at, last_seen_at, ended_at
+	`, session.ID, session.SSHIdentityID, session.SSHFingerprint, session.Client, session.ClientSessionID, session.CurrentScreen, session.SelectedAddressID)
 
 	created := identity.TerminalSession{}
 	if err := row.Scan(
 		&created.ID,
-		&created.UserID,
 		&created.SSHIdentityID,
 		&created.SSHFingerprint,
 		&created.Client,
@@ -347,19 +235,36 @@ func (s *PostgresStore) MarkTerminalSessionEnded(ctx context.Context, sessionID 
 	return nil
 }
 
-func (s *PostgresStore) FindOAuthAccountByUserAndProvider(ctx context.Context, userID, provider string) (auth.OAuthAccount, error) {
+func (s *PostgresStore) AttachSSHIdentityToTerminalSession(ctx context.Context, sessionID, sshIdentityID string) error {
+	result, err := s.pool.Exec(ctx, `
+		UPDATE terminal_sessions
+		SET ssh_identity_id = $2, last_seen_at = now()
+		WHERE id = $1
+	`, sessionID, sshIdentityID)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+func (s *PostgresStore) FindOAuthAccountBySSHIdentityAndProvider(ctx context.Context, sshIdentityID, provider string) (auth.OAuthAccount, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, user_id, provider, provider_user_id, encrypted_access_token, token_expires_at, scopes, status, created_at, updated_at
+		SELECT id, ssh_identity_id, provider, provider_user_id, encrypted_access_token, token_expires_at, scopes, status, created_at, updated_at
 		FROM oauth_accounts
-		WHERE user_id = $1 AND provider = $2
-	`, userID, provider)
+		WHERE ssh_identity_id = $1 AND provider = $2
+	`, sshIdentityID, provider)
 
 	account := auth.OAuthAccount{}
 	var tokenExpiresAt sql.NullTime
 	var encryptedToken string
 	if err := row.Scan(
 		&account.ID,
-		&account.UserID,
+		&account.SSHIdentityID,
 		&account.Provider,
 		&account.ProviderUserID,
 		&encryptedToken,
