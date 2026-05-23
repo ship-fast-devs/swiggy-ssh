@@ -58,7 +58,7 @@ func (v InstamartView) Render(ctx context.Context, w io.Writer) error {
 // InstamartAppView renders the service-backed Instamart flow.
 type InstamartAppView struct {
 	Service         InstamartService
-	UserID          string
+	SSHIdentityID   string
 	Addresses       []domaininstamart.Address
 	SelectedAddress domaininstamart.Address
 	StartTracking   bool
@@ -74,7 +74,7 @@ func (v InstamartAppView) Render(ctx context.Context, w io.Writer) error {
 func (v InstamartAppView) RenderWithResult(ctx context.Context, w io.Writer) (InstamartResult, error) {
 	return instamartflow.InstamartAppView{
 		Service:         v.Service,
-		UserID:          v.UserID,
+		UserID:          v.SSHIdentityID,
 		Addresses:       v.Addresses,
 		SelectedAddress: v.SelectedAddress,
 		StartTracking:   v.StartTracking,

@@ -477,7 +477,7 @@ func (s *SSHServer) runSession(ctx context.Context, ch ssh.Channel, fallbackMsg,
 				continue
 			}
 			_ = tui.ClearScreen(ch)
-			instamartResult, renderErr := (tui.InstamartAppView{Service: s.instamartSvc, UserID: resolvedSSHIdentityID, Addresses: state.addresses, SelectedAddress: selectedAddress, In: ch}).RenderWithResult(ctx, ch)
+			instamartResult, renderErr := (tui.InstamartAppView{Service: s.instamartSvc, SSHIdentityID: resolvedSSHIdentityID, Addresses: state.addresses, SelectedAddress: selectedAddress, In: ch}).RenderWithResult(ctx, ch)
 			if renderErr != nil {
 				return
 			}
@@ -499,7 +499,7 @@ func (s *SSHServer) runSession(ctx context.Context, ch ssh.Channel, fallbackMsg,
 			}
 			selectedAddress, _ := state.selectedAddress()
 			_ = tui.ClearScreen(ch)
-			instamartResult, renderErr := (tui.InstamartAppView{Service: s.instamartSvc, UserID: resolvedSSHIdentityID, Addresses: state.addresses, SelectedAddress: selectedAddress, StartTracking: true, In: ch}).RenderWithResult(ctx, ch)
+			instamartResult, renderErr := (tui.InstamartAppView{Service: s.instamartSvc, SSHIdentityID: resolvedSSHIdentityID, Addresses: state.addresses, SelectedAddress: selectedAddress, StartTracking: true, In: ch}).RenderWithResult(ctx, ch)
 			if renderErr != nil {
 				return
 			}
@@ -542,7 +542,7 @@ func (s *SSHServer) runSession(ctx context.Context, ch ssh.Channel, fallbackMsg,
 			_ = tui.ClearScreen(ch)
 			foodResult, renderErr := (tui.FoodAppView{
 				Service:         s.foodSvc,
-				UserID:          resolvedSSHIdentityID,
+				SSHIdentityID:   resolvedSSHIdentityID,
 				SelectedAddress: foodAddress,
 				In:              ch,
 			}).RenderWithResult(ctx, ch)
@@ -653,11 +653,11 @@ func (s *SSHServer) loadSessionAddresses(ctx context.Context, sshIdentityID stri
 	if state == nil || !state.authenticated {
 		return
 	}
-	if s.instamartSvc == nil || userID == "" {
+	if s.instamartSvc == nil || sshIdentityID == "" {
 		state.addressStatus = tui.HomeAddressUnavailable
 		return
 	}
-	addresses, err := s.instamartSvc.GetAddresses(domainauth.ContextWithUserID(ctx, userID))
+	addresses, err := s.instamartSvc.GetAddresses(domainauth.ContextWithUserID(ctx, sshIdentityID))
 	if err != nil {
 		s.logger.WarnContext(ctx, "session address load failed", "error", err)
 		state.addresses = nil
@@ -821,7 +821,13 @@ func (s *SSHServer) establishDurableSSHIdentityForBrowserAuth(ctx context.Contex
 	}
 	if s.attachSession != nil && terminalSessionID != "" {
 		if err := s.attachSession.Execute(ctx, identity.AttachSSHIdentityToTerminalSessionInput{SessionID: terminalSessionID, SSHIdentityID: sshIdentityID}); err != nil {
-			return "", err
+			// Log attach failure but don't fail the auth flow — the SSH identity
+			// was already durably created, and session tracking is non-critical.
+			s.logger.WarnContext(ctx, "failed to attach ssh identity to terminal session",
+				"ssh_identity_id", sshIdentityID,
+				"terminal_session_id", terminalSessionID,
+				"error", err,
+			)
 		}
 	}
 	return sshIdentityID, nil
