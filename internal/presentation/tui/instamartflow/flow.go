@@ -810,9 +810,13 @@ func (m instamartModel) selectProductRowWithQuantityDelta(idx, delta int) (tea.M
 	if !selected.quantityModalOpen {
 		return selected, nil
 	}
-	selected.quantity = existingQuantity(m.intendedItems, selected.selectedRow.Variation.SpinID) + delta
+	existingQty := existingQuantity(m.intendedItems, selected.selectedRow.Variation.SpinID)
+	selected.quantity = existingQty + delta
 	if selected.quantity < 0 {
 		selected.quantity = 0
+	}
+	if existingQty == 0 && delta < 0 && selected.quantity < 1 {
+		selected.quantity = 1
 	}
 	return selected, nil
 }
@@ -1171,10 +1175,7 @@ func checkoutTrackingOrder(result domaininstamart.CheckoutResult, history domain
 			return order, true
 		}
 	}
-	if len(orderIDs) > 0 {
-		return domaininstamart.OrderSummary{}, false
-	}
-	return history.Orders[0], true
+	return domaininstamart.OrderSummary{}, false
 }
 
 func (v InstamartView) Render(ctx context.Context, w io.Writer) error {

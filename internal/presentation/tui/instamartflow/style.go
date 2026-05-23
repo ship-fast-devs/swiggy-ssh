@@ -208,7 +208,7 @@ func overlayLineAt(background, overlay string, start, end int) string {
 				sequence := background[i:j]
 				if column < start {
 					prefix.WriteString(sequence)
-				} else if column >= end {
+				} else {
 					suffix.WriteString(sequence)
 				}
 				i = j

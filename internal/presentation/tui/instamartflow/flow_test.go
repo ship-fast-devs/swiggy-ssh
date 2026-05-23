@@ -763,8 +763,8 @@ func TestInstamartProductPlusMinusOpenQuantityFromExistingQuantity(t *testing.T)
 	if cmd != nil {
 		t.Fatal("minus should open quantity without updating cart")
 	}
-	if got := minusNew.(instamartModel); got.screen != instamartScreenProductList || !got.quantityModalOpen || got.quantity != 0 {
-		t.Fatalf("expected minus on new item to open quantity 0, got screen=%v modal=%v quantity=%d", got.screen, got.quantityModalOpen, got.quantity)
+	if got := minusNew.(instamartModel); got.screen != instamartScreenProductList || !got.quantityModalOpen || got.quantity != 1 {
+		t.Fatalf("expected minus on new item to open quantity 1, got screen=%v modal=%v quantity=%d", got.screen, got.quantityModalOpen, got.quantity)
 	}
 
 	plusExisting, cmd := (instamartModel{screen: instamartScreenProductList, rows: []productVariationRow{row}, intendedItems: []domaininstamart.CartUpdateItem{{SpinID: "spin-milk", Quantity: 2}}}).handleProductKey("+")
